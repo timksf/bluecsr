@@ -1,4 +1,4 @@
-package TestBlueCSR;
+bpackage TestBlueCSR;
 
 import StmtFSM :: *;
 

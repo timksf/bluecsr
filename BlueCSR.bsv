@@ -42,7 +42,7 @@ interface BlueCSR_ifc#(numeric type aw, numeric type dw);
     method ActionValue#(Bit#(dw)) read_impure(Bit#(aw) addr);
 endinterface
 
-typedef ModuleCollect#(RegMapEntry_t#(dw), ifc) BlueCSRCtx_t#(numeric type dw, type ifc);
+typedef ModuleCollect#(RegMapEntry_t#(aw, dw), ifc) BlueCSRCtx_t#(numeric type aw, numeric type dw, type ifc);
 
 typedef struct {
     String name;
@@ -81,12 +81,12 @@ typedef struct {
 
 typedef struct {
     Integer offs;
-    function Bit#(dw) _(Bit#(aw) a) f_read;
+    function Bit#(dw) _() f_read;
 } ReadOpPure_t#(numeric type dw);
 
 typedef struct {
     Integer offs;
-    function ActionValue#(Bit#(dw)) _(Bit#(aw) a) f_read;
+    function ActionValue#(Bit#(dw)) _() f_read;
 } ReadOpImpure_t#(numeric type dw);
 
 typedef struct {
@@ -97,8 +97,8 @@ typedef struct {
 typedef struct {
     Integer offs;
     Integer length;
-    function Bit#(dw) _(Bit#(dw) a) f_read;
-} ReadRegionPure_t#(numeric type dw);
+    function Bit#(dw) _(Bit#(aw) a) f_read;
+} ReadRegionPure_t#(numeric type aw, numeric type dw);
 
 typedef struct {
     Integer offs;
@@ -107,28 +107,28 @@ typedef struct {
 } WriteRegion_t#(numeric type dw);
 
 typedef union tagged {
-    RegMapDef_t             RegMapDef;
-    RegDef_t                RegDef;
-    RegRegionDef_t          RegRegionDef;
-    AccessPolicyDef_t       AccessPolicyDef;
-    RegFieldDef_t           RegFieldDef;
-    ReadOpPure_t#(dw)       ReadOpPure;
-    ReadOpImpure_t#(dw)     ReadOpImpure;
-    WriteOp_t#(dw)          WriteOp;
-    ReadRegionPure_t#(dw)   ReadRegionPure;
-    WriteRegion_t#(dw)      WriteRegion;
-} RegMapEntry_t#(numeric type dw);
+    RegMapDef_t                 RegMapDef;
+    RegDef_t                    RegDef;
+    RegRegionDef_t              RegRegionDef;
+    AccessPolicyDef_t           AccessPolicyDef;
+    RegFieldDef_t               RegFieldDef;
+    ReadOpPure_t#(dw)           ReadOpPure;
+    ReadOpImpure_t#(dw)         ReadOpImpure;
+    WriteOp_t#(dw)              WriteOp;
+    ReadRegionPure_t#(aw, dw)   ReadRegionPure;
+    WriteRegion_t#(dw)          WriteRegion;
+} RegMapEntry_t#(numeric type aw, numeric type dw);
 
-function List#(ReadOpPure_t#(dw))       get_pure_read           (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged ReadOpPure        .rr ? Cons(rr, Nil) : Nil;
-function List#(ReadOpImpure_t#(dw))     get_impure_read         (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged ReadOpImpure      .rr ? Cons(rr, Nil) : Nil;
-function List#(WriteOp_t#(dw))          get_write_op            (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged WriteOp           .rr ? Cons(rr, Nil) : Nil;
-function List#(ReadRegionPure_t#(dw))   get_pure_read_region    (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged ReadRegionPure    .rr ? Cons(rr, Nil) : Nil;
-function List#(WriteRegion_t#(dw))      get_write_region        (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged WriteRegion       .rr ? Cons(rr, Nil) : Nil;
-function List#(AccessPolicyDef_t)       get_access_policy_def   (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged AccessPolicyDef   .rr ? Cons(rr, Nil) : Nil;
-function List#(RegFieldDef_t)           get_regfield_def        (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged RegFieldDef       .rr ? Cons(rr, Nil) : Nil;
-function List#(RegDef_t)                get_reg_def             (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged RegDef            .rr ? Cons(rr, Nil) : Nil;
-function List#(RegRegionDef_t)          get_reg_region_def      (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged RegRegionDef      .rr ? Cons(rr, Nil) : Nil;
-function List#(RegMapDef_t)             get_regmap_def          (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged RegMapDef         .rr ? Cons(rr, Nil) : Nil;
+function List#(ReadOpPure_t#(dw))           get_pure_read           (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged ReadOpPure        .rr ? Cons(rr, Nil) : Nil;
+function List#(ReadOpImpure_t#(dw))         get_impure_read         (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged ReadOpImpure      .rr ? Cons(rr, Nil) : Nil;
+function List#(WriteOp_t#(dw))              get_write_op            (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged WriteOp           .rr ? Cons(rr, Nil) : Nil;
+function List#(ReadRegionPure_t#(aw, dw))   get_pure_read_region    (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged ReadRegionPure    .rr ? Cons(rr, Nil) : Nil;
+function List#(WriteRegion_t#(dw))          get_write_region        (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged WriteRegion       .rr ? Cons(rr, Nil) : Nil;
+function List#(AccessPolicyDef_t)           get_access_policy_def   (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged AccessPolicyDef   .rr ? Cons(rr, Nil) : Nil;
+function List#(RegFieldDef_t)               get_regfield_def        (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged RegFieldDef       .rr ? Cons(rr, Nil) : Nil;
+function List#(RegDef_t)                    get_reg_def             (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged RegDef            .rr ? Cons(rr, Nil) : Nil;
+function List#(RegRegionDef_t)              get_reg_region_def      (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged RegRegionDef      .rr ? Cons(rr, Nil) : Nil;
+function List#(RegMapDef_t)                 get_regmap_def          (RegMapEntry_t#(dw) regmap_entry) = regmap_entry matches tagged RegMapDef         .rr ? Cons(rr, Nil) : Nil;
 
 typedef struct {
     String reg_defs;
@@ -441,7 +441,7 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(dw)) 
     };
 endfunction
 
-module [BlueCSRCtx_t#(dw)] csr_regmap_def#(String name, String desc)();
+module [BlueCSRCtx_t#(aw, dw)] csr_regmap_def#(String name, String desc)();
     RegMapEntry_t#(dw) entry = tagged RegMapDef RegMapDef_t {
         name:           name,
         description:    desc
@@ -449,7 +449,7 @@ module [BlueCSRCtx_t#(dw)] csr_regmap_def#(String name, String desc)();
     addToCollection(entry);
 endmodule
 
-module [BlueCSRCtx_t#(dw)] csr_reg_def#(Integer offs, String ident, String desc)();
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_def#(Integer offs, String ident, String desc)();
     RegMapEntry_t#(dw) entry = tagged RegDef RegDef_t {
         offset:         offs,
         identifier:     ident,
@@ -458,7 +458,7 @@ module [BlueCSRCtx_t#(dw)] csr_reg_def#(Integer offs, String ident, String desc)
     addToCollection(entry);
 endmodule
 
-module [BlueCSRCtx_t#(dw)] csr_region_def#(Integer offs, Integer len, String ident, String desc)();
+module [BlueCSRCtx_t#(aw, dw)] csr_region_def#(Integer offs, Integer len, String ident, String desc)();
     RegMapEntry_t#(dw) entry = tagged RegRegionDef RegRegionDef_t {
         offset:         offs,
         length:         len,
@@ -468,7 +468,7 @@ module [BlueCSRCtx_t#(dw)] csr_region_def#(Integer offs, Integer len, String ide
     addToCollection(entry);
 endmodule
 
-module [BlueCSRCtx_t#(dw)] csr_reg_prot#(Integer offs, AccessPolicy_t read_policy, AccessPolicy_t write_policy)();
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_prot#(Integer offs, AccessPolicy_t read_policy, AccessPolicy_t write_policy)();
     RegMapEntry_t#(dw) entry = tagged AccessPolicyDef AccessPolicyDef_t {
         offset: offs,
         length: valueOf(TDiv#(dw, 8)), //access policies for a register affect all bytes associated with it
@@ -478,7 +478,7 @@ module [BlueCSRCtx_t#(dw)] csr_reg_prot#(Integer offs, AccessPolicy_t read_polic
     addToCollection(entry);
 endmodule
 
-module [BlueCSRCtx_t#(dw)] csr_region_prot#(Integer offs, Integer len, AccessPolicy_t read_policy, AccessPolicy_t write_policy)();
+module [BlueCSRCtx_t#(aw, dw)] csr_region_prot#(Integer offs, Integer len, AccessPolicy_t read_policy, AccessPolicy_t write_policy)();
     RegMapEntry_t#(dw) entry = tagged AccessPolicyDef AccessPolicyDef_t {
         offset: offs,
         length: len,
@@ -488,7 +488,7 @@ module [BlueCSRCtx_t#(dw)] csr_region_prot#(Integer offs, Integer len, AccessPol
     addToCollection(entry);
 endmodule
 
-module [BlueCSRCtx_t#(dw)] csr_reg_rc#(Integer offs, t v, Integer bitpos, String ident, String name, String desc)() 
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_rc#(Integer offs, t v, Integer bitpos, String ident, String name, String desc)() 
     provisos(
         Bits#(t, sz_t),
         FieldReadPure#(t, dw)
@@ -512,7 +512,7 @@ module [BlueCSRCtx_t#(dw)] csr_reg_rc#(Integer offs, t v, Integer bitpos, String
     addToCollection(field_entry);
 endmodule
 
-module [BlueCSRCtx_t#(dw)] csr_reg_rw#(Integer offs, t rv, Integer bitpos, String ident, String fname, String desc)(Reg#(t)) 
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_rw#(Integer offs, t rv, Integer bitpos, String ident, String fname, String desc)(Reg#(t)) 
     provisos(
         Bits#(t, sz_t),
         FieldReadPure#(t, dw),
@@ -551,8 +551,8 @@ module [BlueCSRCtx_t#(dw)] csr_reg_rw#(Integer offs, t rv, Integer bitpos, Strin
     return r;
 endmodule
 
-module [BlueCSRCtx_t#(dw)] csr_region_ro#(Integer offs, Integer len, String ident, String desc, function Bit#(dw) read_fn(Bit#(dw) local_addr))();
-    function Bit#(dw) do_read(Bit#(dw) local_addr);
+module [BlueCSRCtx_t#(aw, dw)] csr_region_ro#(Integer offs, Integer len, String ident, String desc, function Bit#(dw) read_fn(Bit#(dw) local_addr))();
+    function Bit#(dw) do_read(Bit#(aw) local_addr);
         return read_fn(local_addr);
     endfunction
     addToCollection(tagged ReadRegionPure ReadRegionPure_t {
@@ -563,7 +563,7 @@ module [BlueCSRCtx_t#(dw)] csr_region_ro#(Integer offs, Integer len, String iden
     Empty _ <- csr_region_def(offs, len, ident, desc);
 endmodule
 
-module [BlueCSRCtx_t#(dw)] csr_region_wo#(Integer offs, Integer len, String ident, String desc, function Action write_fn(Bit#(dw) local_addr, Bit#(dw) data))();
+module [BlueCSRCtx_t#(aw, dw)] csr_region_wo#(Integer offs, Integer len, String ident, String desc, function Action write_fn(Bit#(dw) local_addr, Bit#(dw) data))();
     function Action do_write(Bit#(dw) local_addr, Bit#(dw) d);
         action
             write_fn(local_addr, d);
@@ -577,7 +577,7 @@ module [BlueCSRCtx_t#(dw)] csr_region_wo#(Integer offs, Integer len, String iden
     Empty _ <- csr_region_def(offs, len, ident, desc);
 endmodule
 
-module [BlueCSRCtx_t#(dw)] csr_region_rw#(Integer offs, Integer len, String ident, String desc, function Bit#(dw) read_fn(Bit#(dw) local_addr), function Action write_fn(Bit#(dw) local_addr, Bit#(dw) data))();
+module [BlueCSRCtx_t#(aw, dw)] csr_region_rw#(Integer offs, Integer len, String ident, String desc, function Bit#(dw) read_fn(Bit#(dw) local_addr), function Action write_fn(Bit#(dw) local_addr, Bit#(dw) data))();
     function Bit#(dw) do_read(Bit#(dw) local_addr);
         return read_fn(local_addr);
     endfunction
@@ -599,24 +599,19 @@ module [BlueCSRCtx_t#(dw)] csr_region_rw#(Integer offs, Integer len, String iden
     Empty _ <- csr_region_def(offs, len, ident, desc);
 endmodule
 
-function List#(RegFieldDef_t) find_fields_by_offs(List#(RegMapEntry_t) l, Integer offs);
-    function Bool p(RegMapEntry_t entry);
-        return case(entry) matches
-            tagged RegFieldDef .regf: (regf.offset == offs);
-            default: False;
-        endcase
-    endfunction
-    return filter(p, l);
+function List#(RegFieldDef_t) find_fields_by_offs(List#(RegFieldDef_t) l, Integer offs);
+    function Bool p(RegFieldDef_t field_def) = field_def.offset == offs;
+    return List::filter(p, l);
 endfunction
 
-function List#(ReadOpPure_t) find_pure_reads_by_offs(List#(RegMapEntry_t) l, Integer offs);
-    function Bool p(RegMapEntry_t entry);
-        return case(entry) matches
-            tagged ReadOpPure_t .pure_read_op: (pure_read_op.offset == offs);
-            default: False;
-        endcase
-    endfunction
-    return filter(p, l);
+function List#(ReadOpPure_t) find_pure_reads_by_offs(List#(ReadOpPure_t) l, Integer offs);
+    function Bool p(ReadOpPure_t read_op) = read_op.offset == offs; 
+    return List::filter(p, l);
+endfunction
+
+function List#(AccessPolicyDef_t) find_policies_by_offs(List#(AccessPolicyDef_t) l, Integer offs, Integer len);
+    function Bool p(AccessPolicyDef_t pol_def) = pol_def.offs == offs && pol_def.len == len;
+    return List::filter(p, l);
 endfunction
 
 interface BusAccess_ifc#(type ext_ifc, type int_ifc);
@@ -647,15 +642,11 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(dw, i) ctx)(BlueCSRAccess_ifc#(aw
 
     Reg#(Bool) rg_validation_failed <- mkReg(!validation.valid);
 
-    function AccessPolicy_t lookup_read_policy(Integer offs, Integer len);
-        AccessPolicy_t policy = CSR_ALLOW_ALL;
-        for(Integer i = 0; i < length(access_policies); i = i + 1) begin
-            if((access_policies[i].offset == offs) && (access_policies[i].length == len)) begin
-                policy = access_policies[i].read_policy;
-            end
-        end
-        return policy;
-    endfunction
+    Wire#(Bit#(aw))         w_addr  <- mkWire;
+    Wire#(Bit#(dw))         w_data  <- mkWire;
+    Wire#(BlueCSRProt_t)    w_prot  <- mkWire;
+    Wire#(BlueCSRWriteRs_t) w_wresp <- mkWire;
+    Wire#(BlueCSRReadRs_t)  w_rresp <- mkWire;
 
     function AccessPolicy_t lookup_write_policy(Integer offs, Integer len);
         AccessPolicy_t policy = CSR_ALLOW_ALL;
@@ -675,9 +666,37 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(dw, i) ctx)(BlueCSRAccess_ifc#(aw
         return (addr >= fromInteger(offs)) && (addr < fromInteger(offs + len));
     endfunction
 
-    //read rules for all defined registers, implemented at field granularity
+    function ReadOpPure_t#(dw) combine_reads(List#(ReadOpPure_t#(dw)) l);
+        function Bit#(dw) op_read(ReadOpPure_t#(dw) rop);
+            return rop.f_read();
+        endfunction
+        return List::foldl(\| , 0, List::map(l));
+    endfunction
+
+    Rules read_rules = emptyRules;
+
+    //read rules for all defined registers
     for(Integer i = 0; i < List::length(regdefs); i = i + 1) begin
-        let fields = find_fields_by_offs(regdefs[i].offset);
+        let field_reads = find_pure_reads_by_offs(regdefs[i].offset);
+        let reg_policies = find_policies_by_offs(regdefs[i].offset, word_bytes);
+        //validation should have ensured there is only one policy for a given regdef, so take the first
+        let read_policy = List::length(reg_policies) > 0 ? reg_policies[0].read_policy : CSR_ALLOW_ALL;
+        let access_allow = access_policy_allows(read_policy, w_prot);
+        Bool offs_hit = w_addr == fromInteger(regdefs[i].offset);
+        rJoinMutuallyExclusive(
+            rules 
+                rule rread_reg_allow(offs_hit && access_allow);
+                    //all fields are or-combined onto the output wire
+                    //validation ensures that no fields overlap
+                    //the read operations already shift the field to the correct offset within the output word
+                    w_resp <= bluecsr_read_resp(combine_reads(field_reads), CSR_OKAY);
+                endrule
+                rule rread_reg_deny(offs_hit && !access_allow);
+                    //policy for reg definition denied access
+                    w_resp <= bluecsr_read_resp(0, CSR_SLVERR);
+                endrule
+            endrules,
+        read_rules);
     end
 
     function Bit#(dw) do_read_pure(Bit#(aw) addr);
