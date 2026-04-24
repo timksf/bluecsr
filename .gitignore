@@ -1,0 +1,8 @@
+sim/
+build/
+*.so
+*.bo
+*.ba
+*.v
+*.sched
+*_sim
