@@ -5,7 +5,7 @@ import ModuleCollect :: *;
 
 import BlueCSR :: *;
 
-module [Module] doc_blue_csr#(BlueCSRCtx_t#(dw, i) ctx)(RegMapDoc_t#(dw));
+module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
 
     let {coll_device_ifc, c} <- getCollection(ctx);
     let validation = validate_blue_csr_entries(c);
@@ -43,7 +43,7 @@ module [Module] doc_blue_csr#(BlueCSRCtx_t#(dw, i) ctx)(RegMapDoc_t#(dw));
 
 endmodule
 
-module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(dw, i) ctx, String output_path)(BlueCSRExport_ifc);
+module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String output_path)(BlueCSRExport_ifc);
 
     let {coll_device_ifc, c} <- getCollection(ctx);
     let validation = validate_blue_csr_entries(c);
