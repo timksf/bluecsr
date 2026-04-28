@@ -13,51 +13,39 @@ typedef enum {
 } BlueCSRResponse_t deriving(Bits, Eq, FShow);
 
 typedef enum {
+    CSR_RW,     //read-write
+    CSR_RO,     //read-only
+    CSR_RC,     //read-constant
+    CSR_WC,     //write-clear-all
+    CSR_WS,     //write-set-all
+    CSR_W1S,    //write-1-to-set
+    CSR_W1C    //write-1-to-clear
+} BlueCSRAccess_t deriving(Eq, FShow);
+
+typedef enum {
     CSR_SECURE = 1'b0,
     CSR_INSECURE = 1'b1
 } BlueCSRProt_t deriving(Bits, Eq, FShow);
-
-typedef struct {
-    Bit#(dw) data;
-    BlueCSRResponse_t resp;
-} BlueCSRReadRs_t#(numeric type dw) deriving(Bits, Eq, FShow);
-
-typedef struct {
-    BlueCSRResponse_t resp;
-} BlueCSRWriteRs_t deriving(Bits, Eq, FShow);
-
-typedef struct {
-    Bit#(aw) addr;
-    BlueCSRProt_t prot;
-} BlueCSRReadReq_t#(numeric type aw) deriving(Bits, Eq, FShow);
-
-typedef struct {
-    Bit#(aw) addr;
-    Bit#(dw) data;
-    Bit#(TDiv#(dw, 8)) strobe;
-    BlueCSRProt_t prot;
-} BlueCSRWriteReq_t#(numeric type aw, numeric type dw) deriving(Bits, Eq, FShow);
 
 typedef enum {
     CSR_ALLOW_ALL,
     CSR_SEC_SECURE_ONLY,
     CSR_SEC_INSECURE_ONLY
-} AccessPolicy_t deriving(Bits, Eq, FShow);
+} BlueCSRAccessPolicy_t deriving(Bits, Eq, FShow);
 
 interface BlueCSR_ifc#(numeric type aw, numeric type dw);
-    method Bool read_request_ready;
-    method Action read_request(Bool valid, BlueCSRReadReq_t#(aw) req);
-    method Bool read_response_valid;
-    (* always_ready *)
-    method BlueCSRReadRs_t#(dw) read_response;
-    method Action read_response_ready(Bool ready);
 
-    method Bool write_request_ready;
-    method Action write_request(Bool valid, BlueCSRWriteReq_t#(aw, dw) req);
-    method Bool write_response_valid;
-    (* always_ready *)
-    method BlueCSRWriteRs_t write_response;
-    method Action write_response_ready(Bool ready);
+    (*prefix=""*) method Action valid ((*port = "i_valid"*) Bit#(1)             valid );
+    (*prefix=""*) method Action wr    ((*port = "i_wr   "*) Bit#(1)             wr    );
+    (*prefix=""*) method Action addr  ((*port = "i_addr "*) Bit#(aw)            addr  );
+    (*prefix=""*) method Action wdata ((*port = "i_data "*) Bit#(dw)            data  );
+    (*prefix=""*) method Action wstrb ((*port = "i_strb "*) Bit#(TDiv#(dw, 8))  strb  );
+    (*prefix=""*) method Action prot  ((*port = "i_prot "*) BlueCSRProt_t       prot  );
+
+    (*result="o_rdy "*) method Bit#(1)              ready;
+    (*result="o_data"*) method Bit#(dw)             rdata;
+    (*result="o_resp"*) method BlueCSRResponse_t    resp;
+
 endinterface
 
 typedef ModuleCollect#(RegMapEntry_t#(aw, dw), ifc) BlueCSRCtx_t#(numeric type aw, numeric type dw, type ifc);
@@ -83,8 +71,8 @@ typedef struct {
 typedef struct {
     Integer offset;
     Integer length;
-    AccessPolicy_t read_policy;
-    AccessPolicy_t write_policy;
+    BlueCSRAccessPolicy_t read_policy;
+    BlueCSRAccessPolicy_t write_policy;
 } AccessPolicyDef_t;
 
 typedef struct {
@@ -194,6 +182,12 @@ instance Eq#(RegRegionDef_t);
     endfunction
 endinstance
 
+instance Eq#(AccessPolicyDef_t);
+    function Bool \== (AccessPolicyDef_t apa, AccessPolicyDef_t apb);
+        return apa.offset == apb.offset && apa.length == apb.length;
+    endfunction
+endinstance
+
 function ActionValue#(Bit#(dw)) field_read_impure(Reg#(t) r, Integer field_offs) 
     provisos(
         Bits#(t, st),
@@ -226,6 +220,21 @@ function Action field_write_strobed(Reg#(t) r, Integer field_offs, Bit#(dw) d, B
     endaction
 endfunction
 
+function Action field_w1c(Reg#(t) r, Integer field_offs, Bit#(dw) d, Bit#(b__) strb);
+    provisos(
+        Bits#(t, st),
+        Add#(st, a__, dw),
+        Mul#(b__, 8, dw),
+        Div#(dw, 8, b__)
+    );
+    action
+        Bit#(dw) d_clr = r & ~d;
+        field_write_strobed(r, fields_offs, d_clr, strobe);
+    endaction
+endfunction
+
+function Action field_w1s = field_write_strobed;
+
 function Integer bit_to_integer(Bit#(n) x);
     Integer res = 0;
     for (Integer i = 0; i < valueOf(n); i = i + 1)
@@ -239,7 +248,7 @@ function String append_newline(String acc, String msg);
     else return acc + "\n" + msg;
 endfunction
 
-function Bool access_policy_allows(AccessPolicy_t policy, BlueCSRProt_t prot);
+function Bool access_policy_allows(BlueCSRAccessPolicy_t policy, BlueCSRProt_t prot);
     return case (policy)
         CSR_ALLOW_ALL:          True;
         CSR_SEC_SECURE_ONLY:    (prot == CSR_SECURE);
@@ -498,7 +507,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_region_def#(Integer offs, Integer len, String
     addToCollection(entry);
 endmodule
 
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_prot#(Integer offs, AccessPolicy_t read_policy, AccessPolicy_t write_policy)();
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_prot#(Integer offs, BlueCSRAccessPolicy_t read_policy, BlueCSRAccessPolicy_t write_policy)();
     RegMapEntry_t#(aw, dw) entry = tagged AccessPolicyDef AccessPolicyDef_t {
         offset: offs,
         length: valueOf(TDiv#(dw, 8)), //access policies for a register affect all bytes associated with it
@@ -508,7 +517,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_prot#(Integer offs, AccessPolicy_t read_p
     addToCollection(entry);
 endmodule
 
-module [BlueCSRCtx_t#(aw, dw)] csr_region_prot#(Integer offs, Integer len, AccessPolicy_t read_policy, AccessPolicy_t write_policy)();
+module [BlueCSRCtx_t#(aw, dw)] csr_region_prot#(Integer offs, Integer len, BlueCSRAccessPolicy_t read_policy, BlueCSRAccessPolicy_t write_policy)();
     RegMapEntry_t#(aw, dw) entry = tagged AccessPolicyDef AccessPolicyDef_t {
         offset: offs,
         length: len,
@@ -516,6 +525,23 @@ module [BlueCSRCtx_t#(aw, dw)] csr_region_prot#(Integer offs, Integer len, Acces
         write_policy: write_policy
     };
     addToCollection(entry);
+endmodule
+
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_field#(BlueCSRAccess_t access_type, Integer offs, t v, Integer bitpos, String ident, String name, String desc)() 
+    
+    function Bit#(dw) do_read(Bit#(aw) a) = 0;
+    function Action do_write(Bit#(aw) a, Bit#(dw) d, Bit#(TDiv#(dw, 8)) s) = noAction;
+    case(access_type)
+        CSR_RW: begin 
+            do_read = field_read_pure(v, bitpos);
+        end
+        CSR_RO: begin end
+        CSR_RC: begin end
+        CSR_WC: begin end
+        CSR_WS: begin end
+        CSR_W1S: begin end
+        CSR_W1C: begin end
+    endcase
 endmodule
 
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_rc#(Integer offs, t v, Integer bitpos, String ident, String name, String desc)() 
@@ -582,6 +608,17 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_rw#(Integer offs, t rv, Integer bitpos, S
     addToCollection(field_entry);
 
     return r;
+endmodule
+
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c#(Integer offs, t rv, Integer bitpos, String ident, String fname, String desc)(Reg#(t)) 
+    provisos(
+        Bits#(t, sz_t),
+        FieldReadPure#(t, dw),
+        Add#(sz_t, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+
 endmodule
 
 module [BlueCSRCtx_t#(aw, dw)] csr_region_ro#(Integer offs, Integer len, String ident, String desc, function Bit#(dw) read_fn(Bit#(aw) local_addr))();
