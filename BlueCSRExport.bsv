@@ -4,6 +4,7 @@ import List :: *;
 import ModuleCollect :: *;
 
 import BlueCSR :: *;
+import BlueCSRValidation :: *;
 
 module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
 
@@ -51,7 +52,6 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
     let regiondefs          = List::concat(List::map(get_reg_region_def, c));
     let regfields           = List::concat(List::map(get_regfield_def, c));
     let pure_reads          = List::concat(List::map(get_pure_read, c));
-    let impure_reads        = List::concat(List::map(get_impure_read, c));
     let writes              = List::concat(List::map(get_write_op, c));
     let pure_read_regions   = List::concat(List::map(get_pure_read_region, c));
     let write_regions       = List::concat(List::map(get_write_region, c));
@@ -71,9 +71,6 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
         Bool found = False;
         for(Integer i = 0; i < length(pure_reads); i = i + 1) begin
             found = found || pure_reads[i].offs == offs;
-        end
-        for(Integer i = 0; i < length(impure_reads); i = i + 1) begin
-            found = found || impure_reads[i].offs == offs;
         end
         return found;
     endfunction
@@ -142,7 +139,6 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
                     $fwrite(fh, "    sw = %s;\n", sw);
                     $fwrite(fh, "  } external %s @ 0x%s;\n", region.identifier, integerToHex(region.offset));
                 end
-
                 for(Integer ri = 0; ri < length(regdefs); ri = ri + 1) begin
                     let rd = regdefs[ri];
                     Bool can_read = has_read_access(rd.offset);
