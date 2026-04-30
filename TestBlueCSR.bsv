@@ -3,6 +3,7 @@ package TestBlueCSR;
 import StmtFSM :: *;
 
 import BlueCSR :: *;
+import BlueCSRTb :: *;
 import BlueCSRExport :: *;
 
 typedef enum { Mode0, Mode1, Mode2 } Mode_t deriving(Bits, Eq, FShow);
@@ -18,7 +19,7 @@ typedef enum {
     YELLOW,
     GREEN,
     NORMAL
-    } DisplayColors deriving(Bits, Eq, FShow);
+} DisplayColors deriving(Bits, Eq, FShow);
 
 function Action printColor(DisplayColors color, Fmt text);
     action
@@ -56,7 +57,7 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
     e <- csr_reg_def('h04, "CTRL", "Module control register");
     rg_ctrl_en   <- csr_reg_rw('h04, False, 0, "CTRLEN",    "Control Enable",       "Controls whether module is enabled or not.");
     rg_ctrl_mode <- csr_reg_rw('h04, Mode1, 4, "MODE",      "Control Mode Setting", "Controls operating mode.");
-    e <- csr_reg_prot('h04, CSR_ALLOW_ALL, CSR_SEC_SECURE_ONLY);
+    e <- csr_reg_prot('h04, CSR_SEC_SECURE_ONLY, CSR_SEC_SECURE_ONLY);
 
     e <- csr_reg_def('h08, "STS", "Module status register");
 
@@ -74,50 +75,8 @@ module [Module] mkTestBlueCSR(Empty);
 
     messageM(doc.reg_defs);
 
-    function Action drive_idle();
-        action
-            cfg.external.valid(0);
-            cfg.external.wr(0);
-            cfg.external.addr(0);
-            cfg.external.wdata(0);
-            cfg.external.wstrb(0);
-            cfg.external.prot(CSR_SECURE);
-        endaction
-    endfunction
-
-    function Action issue_read(Bit#(32) addr, BlueCSRProt_t prot);
-        action
-            cfg.external.valid(1);
-            cfg.external.wr(0);
-            cfg.external.addr(addr);
-            cfg.external.wdata(0);
-            cfg.external.wstrb(0);
-            cfg.external.prot(prot);
-        endaction
-    endfunction
-
-    function ActionValue#(Tuple2#(Bit#(32), BlueCSRResponse_t)) accept_read_response();
-        actionvalue
-            return tuple2(cfg.external.rdata, cfg.external.resp);
-        endactionvalue
-    endfunction
-
-    function Action issue_write(Bit#(32) addr, Bit#(32) data, Bit#(4) strobe, BlueCSRProt_t prot);
-        action
-            cfg.external.valid(1);
-            cfg.external.wr(1);
-            cfg.external.addr(addr);
-            cfg.external.wdata(data);
-            cfg.external.wstrb(strobe);
-            cfg.external.prot(prot);
-        endaction
-    endfunction
-
-    function ActionValue#(BlueCSRResponse_t) accept_write_response();
-        actionvalue
-            return cfg.external.resp;
-        endactionvalue
-    endfunction
+    Reg#(Bit#(32)) rg_addr <- mkReg(0);
+    Reg#(Bit#(32)) rg_data <- mkReg(0);
 
     Stmt s = seq
         printColorTimed(BLUE, $format("Hello World!"));
@@ -132,16 +91,18 @@ module [Module] mkTestBlueCSR(Empty);
             printColorTimed(GREEN, $format("SystemRDL export completed."));
         endaction
 
-        issue_read(0, CSR_SECURE);
-        action
-            let bus0 <- accept_read_response();
-            $display("BUS[0x00]: %08x", tpl_1(bus0));
-        endaction
-        drive_idle();
+        read_csr_range(cfg.external, rg_addr, rg_data, 0, 8);
 
-        // issue_read('h04, CSR_SECURE);
+        // issue_read(0, CSR_SECURE);
         // action
-        //     let ctrl_reset_rsp <- accept_read_response();
+        //     let bus0 <- accept_read_response();
+        //     $display("BUS[0x00]: %08x", tpl_1(bus0));
+        // endaction
+        // drive_idle();
+
+        // issue_read(cfg.external, 'h04, CSR_SECURE);
+        // action
+        //     let ctrl_reset_rsp <- accept_read_response(cfg.external);
         //     if(tpl_2(ctrl_reset_rsp) != CSR_OKAY) begin
         //         printColorTimed(RED, $format("Sanity fail: reset CTRL read expected OKAY"));
         //         $finish();
@@ -151,7 +112,7 @@ module [Module] mkTestBlueCSR(Empty);
         //         $finish();
         //     end
         // endaction
-        // drive_idle();
+        drive_idle(cfg.external);
 
         // issue_write('h04, 'h00000021, 'b1111, CSR_INSECURE);
         // action

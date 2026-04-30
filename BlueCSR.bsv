@@ -1,6 +1,7 @@
 package BlueCSR;
 
 import List :: *;
+import DReg :: *;
 import BUtils :: *;
 import Vector :: *;
 import ModuleCollect :: *;
@@ -572,12 +573,12 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
 
     Integer word_bytes = valueOf(TDiv#(dw, 8));
 
-    Reg#(Bit#(1)) rg_valid <- mkReg(0);
-    Reg#(Bit#(1)) rg_wr <- mkReg(0);
-    Reg#(Bit#(aw)) rg_addr <- mkReg(0);
-    Reg#(Bit#(dw)) rg_wdata <- mkReg(0);
-    Reg#(Bit#(TDiv#(dw, 8))) rg_wstrb <- mkReg(0);
-    Reg#(BlueCSRProt_t) rg_prot <- mkReg(CSR_SECURE);
+    Reg#(Bit#(1))               rg_valid    <- mkDReg(0);
+    Reg#(Bit#(1))               rg_wr       <- mkReg(0);
+    Reg#(Bit#(aw))              rg_addr     <- mkReg(0);
+    Reg#(Bit#(dw))              rg_wdata    <- mkReg(0);
+    Reg#(Bit#(TDiv#(dw, 8)))    rg_wstrb    <- mkReg(0);
+    Reg#(BlueCSRProt_t)         rg_prot     <- mkDReg(CSR_INSECURE);
 
     Wire#(Bit#(dw)) w_rdata <- mkDWire(0);
     Wire#(BlueCSRResponse_t) w_resp <- mkDWire(CSR_OKAY);
