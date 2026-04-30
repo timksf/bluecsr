@@ -18,16 +18,90 @@ module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
         messageM(validation.errors);
     end
 
+    function String repeatString(String value, Integer count);
+        if (count <= 0) return "";
+        else return value + repeatString(value, count - 1);
+    endfunction
+
+    function String repeatSpaces(Integer count);
+        return repeatString(" ", count);
+    endfunction
+
+    function String padLeftWith(String value, Integer width, String fill);
+        Integer padding = width - stringLength(value);
+        return repeatString(fill, padding) + value;
+    endfunction
+
+    function String padRight(String value, Integer width);
+        Integer padding = width - stringLength(value);
+        return value + repeatSpaces(padding);
+    endfunction
+
+    function String padLeft(String value, Integer width);
+        return padLeftWith(value, width, " ");
+    endfunction
+
+    function String padInteger(Integer value, Integer width);
+        return padLeftWith(integerToString(value), width, "0");
+    endfunction
+
+    function String fieldBits(RegFieldDef_t rf);
+        Integer msb = rf.bit_offset + rf.width - 1;
+        return "[" + padInteger(msb, 2) + ":" + padInteger(rf.bit_offset, 2) + "]";
+    endfunction
+
+    function String fieldReset(RegFieldDef_t rf);
+        return "reset=" + rf.reset_value;
+    endfunction
+
+    function Integer regOffsetWidth(RegDef_t regdef);
+        return stringLength(integerToHex(regdef.offset));
+    endfunction
+
+    function Integer regIdentifierWidth(RegDef_t regdef);
+        return stringLength(regdef.identifier);
+    endfunction
+
+    function Integer fieldIdentifierWidth(RegFieldDef_t rf);
+        return stringLength(rf.identifier);
+    endfunction
+
+    function Integer fieldBitsWidth(RegFieldDef_t rf);
+        return stringLength(fieldBits(rf));
+    endfunction
+
+    function Integer fieldResetWidth(RegFieldDef_t rf);
+        return stringLength(fieldReset(rf));
+    endfunction
+
     function String doc_reg(RegDef_t regdef);
+        Integer reg_offset_width        = List::foldr(max, 0, List::map(regOffsetWidth, regdefs));
+        Integer reg_identifier_width    = List::foldr(max, 0, List::map(regIdentifierWidth, regdefs));
+        Integer field_identifier_width  = List::foldr(max, 0, List::map(fieldIdentifierWidth, regfields));
+        Integer field_bits_width        = List::foldr(max, 0, List::map(fieldBitsWidth, regfields));
+        Integer field_reset_width       = List::foldr(max, 0, List::map(fieldResetWidth, regfields));
         String field_doc = "";
         for(Integer fi = 0; fi < length(regfields); fi = fi + 1) begin
             let rf = regfields[fi];
             if (rf.offset == regdef.offset) begin
-                Integer msb = rf.bit_offset + rf.width - 1;
-                field_doc = field_doc + "\n  " + rf.identifier + " [" + integerToString(msb) + ":" + integerToString(rf.bit_offset) + "] reset=" + rf.reset_value + " " + rf.description;
+                String bits = fieldBits(rf);
+                String reset = fieldReset(rf);
+                field_doc = field_doc + "\n  "
+                    + padRight(rf.identifier, field_identifier_width)
+                    + "  "
+                    + padRight(bits, field_bits_width)
+                    + "  "
+                    + padRight(reset, field_reset_width)
+                    + "  "
+                    + rf.description;
             end
         end
-        return "" + integerToHex(regdef.offset) + " " + regdef.identifier + " " + regdef.description + field_doc;
+        return padLeft(integerToHex(regdef.offset), reg_offset_width)
+            + "  "
+            + padRight(regdef.identifier, reg_identifier_width)
+            + "  "
+            + regdef.description
+            + field_doc;
     endfunction
 
     function String doc_region(RegRegionDef_t regiondef);
