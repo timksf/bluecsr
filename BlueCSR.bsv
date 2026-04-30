@@ -37,12 +37,12 @@ typedef enum {
 
 (*always_enabled*)
 interface BlueCSR_ifc#(numeric type aw, numeric type dw);
-    (*prefix = ""*) method Action valid((*port = "i_valid"*) Bit#(1) valid);
-    (*prefix = ""*) method Action wr((*port = "i_wr"*) Bit#(1) wr);
-    (*prefix = ""*) method Action addr((*port = "i_addr"*) Bit#(aw) addr);
-    (*prefix = ""*) method Action wdata((*port = "i_data"*) Bit#(dw) data);
-    (*prefix = ""*) method Action wstrb((*port = "i_strb"*) Bit#(TDiv#(dw, 8)) strb);
-    (*prefix = ""*) method Action prot((*port = "i_prot"*) BlueCSRProt_t prot);
+    (*prefix = ""*) method Action valid ((*port = "i_valid"*)   Bit#(1)             valid   );
+    (*prefix = ""*) method Action wr    ((*port = "i_wr"*)      Bit#(1)             wr      );
+    (*prefix = ""*) method Action addr  ((*port = "i_addr"*)    Bit#(aw)            addr    );
+    (*prefix = ""*) method Action wdata ((*port = "i_data"*)    Bit#(dw)            data    );
+    (*prefix = ""*) method Action wstrb ((*port = "i_strb"*)    Bit#(TDiv#(dw, 8))  strb    );
+    (*prefix = ""*) method Action prot  ((*port = "i_prot"*)    BlueCSRProt_t       prot    );
 
     (*result = "o_rdy"*)    method Bit#(1)              ready;
     (*result = "o_data"*)   method Bit#(dw)             rdata;
@@ -422,7 +422,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_field#(BlueCSRAccess_t access_type, Integ
         end
     endcase
 
-    RegMapEntry_t#(aw, dw) read_entry = tagged ReadOpPure ReadOpPure_t { offs: offs, f_read: do_read };
+    RegMapEntry_t#(aw, dw) read_entry  = tagged ReadOpPure ReadOpPure_t { offs: offs, f_read: do_read };
     RegMapEntry_t#(aw, dw) write_entry = tagged WriteOp WriteOp_t { offs: offs, f_write: do_write };
     RegMapEntry_t#(aw, dw) field_entry = tagged RegFieldDef RegFieldDef_t {
         offset: offs,
@@ -441,6 +441,30 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_field#(BlueCSRAccess_t access_type, Integ
     return r;
 endmodule
 
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_rw#(Integer offs, t rv, Integer bitpos, String ident, String fname, String desc)(Reg#(t))
+    provisos(
+        Bits#(t, sz_t),
+        FieldReadPure#(t, dw),
+        Add#(sz_t, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    let r <- csr_reg_field(CSR_RW, offs, rv, bitpos, ident, fname, desc);
+    return r;
+endmodule
+
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_ro#(Integer offs, t rv, Integer bitpos, String ident, String fname, String desc)(Reg#(t))
+    provisos(
+        Bits#(t, sz_t),
+        FieldReadPure#(t, dw),
+        Add#(sz_t, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    let r <- csr_reg_field(CSR_RO, offs, rv, bitpos, ident, fname, desc);
+    return r;
+endmodule
+
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_rc#(Integer offs, t v, Integer bitpos, String ident, String name, String desc)()
     provisos(
         Bits#(t, sz_t),
@@ -452,7 +476,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_rc#(Integer offs, t v, Integer bitpos, St
     Reg#(t) _r <- csr_reg_field(CSR_RC, offs, v, bitpos, ident, name, desc);
 endmodule
 
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_rw#(Integer offs, t rv, Integer bitpos, String ident, String fname, String desc)(Reg#(t))
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_ws#(Integer offs, t rv, Integer bitpos, String ident, String name, String desc)(Reg#(t))
     provisos(
         Bits#(t, sz_t),
         FieldReadPure#(t, dw),
@@ -460,7 +484,19 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_rw#(Integer offs, t rv, Integer bitpos, S
         Mul#(TDiv#(dw, 8), 8, dw),
         Div#(dw, 8, TDiv#(dw, 8))
     );
-    let r <- csr_reg_field(CSR_RW, offs, rv, bitpos, ident, fname, desc);
+    Reg#(t) r <- csr_reg_field(CSR_WS, offs, rv, bitpos, ident, name, desc);
+    return r;
+endmodule
+
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_wc#(Integer offs, t rv, Integer bitpos, String ident, String name, String desc)(Reg#(t))
+    provisos(
+        Bits#(t, sz_t),
+        FieldReadPure#(t, dw),
+        Add#(sz_t, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    Reg#(t) r <- csr_reg_field(CSR_WC, offs, rv, bitpos, ident, name, desc);
     return r;
 endmodule
 
