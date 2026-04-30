@@ -621,10 +621,7 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
                 w_rdata <= combine_reads(field_reads);
                 w_resp <= CSR_OKAY;
             endrule
-            rule rread_reg_deny((rg_valid == 1'b1) && (rg_wr == 1'b0) && (rg_addr == fromInteger(regdefs[i].offset)) && !access_policy_allows(read_policy, rg_prot));
-                w_rdata <= 0;
-                w_resp <= CSR_SLVERR;
-            endrule
+            //when a read is denied, the default rule will fire
         endrules, read_rules);
 
         write_rules = rJoinMutuallyExclusive(rules
@@ -633,9 +630,7 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
                 dispatch_reg_writes(reg_writes, rg_wdata, rg_wstrb);
                 w_resp <= CSR_OKAY;
             endrule
-            rule rwrite_reg_deny((rg_valid == 1'b1) && (rg_wr == 1'b1) && (rg_addr == fromInteger(regdefs[i].offset)) && !access_policy_allows(write_policy, rg_prot));
-                w_resp <= CSR_SLVERR;
-            endrule
+            //when a write is denied, the default rule will fire
         endrules, write_rules);
     end
 
@@ -671,18 +666,22 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
     //     endrules, write_rules);
     // end
 
-    read_rules = rJoinDescendingUrgency(rules
-        rule rread_default((rg_valid == 1'b1) && (rg_wr == 1'b0));
-            w_rdata <= 0;
-            w_resp <= CSR_DECERR;
-        endrule
-    endrules, read_rules);
+    read_rules = rJoinDescendingUrgency(read_rules,
+        rules
+            rule rread_default((rg_valid == 1'b1) && (rg_wr == 1'b0));
+                w_rdata <= 0;
+                w_resp <= CSR_DECERR;
+            endrule
+        endrules
+    );
 
-    write_rules = rJoinDescendingUrgency(rules
-        rule rwrite_default((rg_valid == 1'b1) && (rg_wr == 1'b1));
-            w_resp <= CSR_DECERR;
-        endrule
-    endrules, write_rules);
+    write_rules = rJoinDescendingUrgency(write_rules,
+        rules
+            rule rwrite_default((rg_valid == 1'b1) && (rg_wr == 1'b1));
+                w_resp <= CSR_DECERR;
+            endrule
+        endrules
+    );
 
     addRules(read_rules);
     addRules(write_rules);

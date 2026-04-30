@@ -22,8 +22,8 @@ ARGSC ?= -show-schedule
 #-no-warn-action-shadowing
 ARGSCV ?= -show-schedule -remove-dollar
 
-BLUELIB_DIR=BlueLib/src
-BLUEAXI_DIR=BlueAXI/src
+BLUELIB_DIR=
+BLUEAXI_DIR=
 BLUEIMPORT=$(BLUELIB_DIR):$(BLUEAXI_DIR):+
 
 all: $(EXE)
