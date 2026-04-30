@@ -635,37 +635,33 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
         endrules, write_rules);
     end
 
-    // for (Integer i = 0; i < List::length(regiondefs); i = i + 1) begin
-    //     let region_reads = find_pure_read_regions_by_range(pure_read_regions, regiondefs[i].offset, regiondefs[i].length);
-    //     let region_writes = find_write_regions_by_range(write_regions, regiondefs[i].offset, regiondefs[i].length);
-    //     let region_policies = find_policies_by_offs(access_policies, regiondefs[i].offset, regiondefs[i].length);
-    //     let read_policy = List::length(region_policies) > 0 ? region_policies[0].read_policy : CSR_ALLOW_ALL;
-    //     let write_policy = List::length(region_policies) > 0 ? region_policies[0].write_policy : CSR_ALLOW_ALL;
+    for (Integer i = 0; i < List::length(regiondefs); i = i + 1) begin
+        let region_reads = find_pure_read_regions_by_range(pure_read_regions, regiondefs[i].offset, regiondefs[i].length);
+        let region_writes = find_write_regions_by_range(write_regions, regiondefs[i].offset, regiondefs[i].length);
+        let region_policies = find_policies_by_offs(access_policies, regiondefs[i].offset, regiondefs[i].length);
+        let read_policy = List::length(region_policies) > 0 ? region_policies[0].read_policy : CSR_ALLOW_ALL;
+        let write_policy = List::length(region_policies) > 0 ? region_policies[0].write_policy : CSR_ALLOW_ALL;
 
-    //     read_rules = rJoinMutuallyExclusive(rules
-    //         rule rread_region_allow((rg_valid == 1'b1) && (rg_wr == 1'b0) && is_region_addr(rg_addr, regiondefs[i].offset, regiondefs[i].length) && is_word_aligned(rg_addr) && access_policy_allows(read_policy, rg_prot));
-    //             Bit#(dw) read_data = (List::length(region_reads) > 0) ? region_reads[0].f_read(rg_addr - fromInteger(regiondefs[i].offset)) : 0;
-    //             w_rdata <= read_data;
-    //             w_resp <= CSR_OKAY;
-    //         endrule
-    //         rule rread_region_deny((rg_valid == 1'b1) && (rg_wr == 1'b0) && is_region_addr(rg_addr, regiondefs[i].offset, regiondefs[i].length) && (!is_word_aligned(rg_addr) || !access_policy_allows(read_policy, rg_prot)));
-    //             w_rdata <= 0;
-    //             w_resp <= CSR_SLVERR;
-    //         endrule
-    //     endrules, read_rules);
+        read_rules = rJoinMutuallyExclusive(rules
+            rule rread_region_allow((rg_valid == 1'b1) && (rg_wr == 1'b0) && is_region_addr(rg_addr, regiondefs[i].offset, regiondefs[i].length) && is_word_aligned(rg_addr) && access_policy_allows(read_policy, rg_prot));
+                Bit#(dw) read_data = (List::length(region_reads) > 0) ? region_reads[0].f_read(rg_addr - fromInteger(regiondefs[i].offset)) : 0;
+                w_rdata <= read_data;
+                w_resp <= CSR_OKAY;
+            endrule
+        endrules, read_rules);
 
-    //     write_rules = rJoinMutuallyExclusive(rules
-    //         rule rwrite_region_allow((rg_valid == 1'b1) && (rg_wr == 1'b1) && is_region_addr(rg_addr, regiondefs[i].offset, regiondefs[i].length) && is_word_aligned(rg_addr) && (rg_wstrb == '1) && access_policy_allows(write_policy, rg_prot));
-    //             if (List::length(region_writes) > 0) begin
-    //                 region_writes[0].f_write(rg_addr - fromInteger(regiondefs[i].offset), rg_wdata);
-    //             end
-    //             w_resp <= CSR_OKAY;
-    //         endrule
-    //         rule rwrite_region_deny((rg_valid == 1'b1) && (rg_wr == 1'b1) && is_region_addr(rg_addr, regiondefs[i].offset, regiondefs[i].length) && (!is_word_aligned(rg_addr) || (rg_wstrb != '1) || !access_policy_allows(write_policy, rg_prot)));
-    //             w_resp <= CSR_SLVERR;
-    //         endrule
-    //     endrules, write_rules);
-    // end
+        // write_rules = rJoinMutuallyExclusive(rules
+        //     rule rwrite_region_allow((rg_valid == 1'b1) && (rg_wr == 1'b1) && is_region_addr(rg_addr, regiondefs[i].offset, regiondefs[i].length) && is_word_aligned(rg_addr) && (rg_wstrb == '1) && access_policy_allows(write_policy, rg_prot));
+        //         if (List::length(region_writes) > 0) begin
+        //             region_writes[0].f_write(rg_addr - fromInteger(regiondefs[i].offset), rg_wdata);
+        //         end
+        //         w_resp <= CSR_OKAY;
+        //     endrule
+        //     rule rwrite_region_deny((rg_valid == 1'b1) && (rg_wr == 1'b1) && is_region_addr(rg_addr, regiondefs[i].offset, regiondefs[i].length) && (!is_word_aligned(rg_addr) || (rg_wstrb != '1) || !access_policy_allows(write_policy, rg_prot)));
+        //         w_resp <= CSR_SLVERR;
+        //     endrule
+        // endrules, write_rules);
+    end
 
     read_rules = rJoinDescendingUrgency(read_rules,
         rules

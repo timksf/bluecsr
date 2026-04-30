@@ -7,3 +7,4 @@ build/
 *.sched
 *_sim
 *.vcd
+*_simv

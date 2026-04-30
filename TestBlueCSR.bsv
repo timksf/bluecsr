@@ -66,30 +66,26 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
 
 endmodule
 
-module [Module] mkTestBlueCSR(Empty);
-
+(* synthesize *)
+module mk_config(BlueCSRAccess_ifc#(32, 32, ModConfig_ifc));
     BlueCSRAccess_ifc#(32, 32, ModConfig_ifc) cfg <- create_blue_csr(module_config);
     BlueCSRExport_ifc rdl_export <- export_systemrdl_blue_csr(module_config, "sim/testBlueCSR.rdl");
 
     RegMapDoc_t#(32) doc <- doc_blue_csr(module_config);
 
     messageM(doc.reg_defs);
+    return cfg;
+endmodule
+
+module [Module] mkTestBlueCSR(Empty);
+
+    let cfg <- mk_config;
 
     Reg#(Bit#(32)) rg_addr <- mkReg(0);
     Reg#(Bit#(32)) rg_data <- mkReg(0);
 
     Stmt s = seq
         printColorTimed(BLUE, $format("Hello World!"));
-
-        while(!rdl_export.done) noAction;
-
-        action
-            if(!rdl_export.success) begin
-                printColorTimed(RED, $format("SystemRDL export failed."));
-                $finish();
-            end
-            printColorTimed(GREEN, $format("SystemRDL export completed."));
-        endaction
 
         read_csr_range(cfg.external, rg_addr, rg_data, 0, 8);
 
