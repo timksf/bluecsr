@@ -35,6 +35,12 @@ typedef enum {
     CSR_SEC_INSECURE_ONLY
 } BlueCSRAccessPolicy_t deriving(Bits, Eq, FShow);
 
+typedef enum {
+    TRIG_RO,
+    TRIG_WO,
+    TRIG_RW
+} BlueCSRTrigger_t deriving(Bits, Eq, FShow);
+
 (*always_enabled*)
 interface BlueCSR_ifc#(numeric type aw, numeric type dw);
     (*prefix = ""*) method Action valid ((*port = "i_valid"*)   Bit#(1)             valid   );
@@ -108,6 +114,18 @@ typedef struct {
     function Action _(Bit#(aw) a, Bit#(dw) d) f_write;
 } WriteRegion_t#(numeric type aw, numeric type dw);
 
+typedef struct {
+    Integer offs;
+    Bool delay;
+    function Action _() trigger;
+} ReadTrigger_t;
+
+typedef struct {
+    Integer offs;
+    Bool delay;
+    function Action _() trigger;
+} WriteTrigger_t;
+
 typedef union tagged {
     RegMapDef_t             RegMapDef;
     RegDef_t                RegDef;
@@ -118,6 +136,8 @@ typedef union tagged {
     WriteOp_t#(dw)          WriteOp;
     ReadRegion_t#(aw, dw)   ReadRegion;
     WriteRegion_t#(aw, dw)  WriteRegion;
+    ReadTrigger_t           ReadTrigger;
+    WriteTrigger_t          WriteTrigger;
 } RegMapEntry_t#(numeric type aw, numeric type dw);
 
 function List#(ReadOpPure_t#(dw)) get_pure_read(RegMapEntry_t#(aw, dw) regmap_entry) =
@@ -138,6 +158,11 @@ function List#(RegRegionDef_t) get_reg_region_def(RegMapEntry_t#(aw, dw) regmap_
     regmap_entry matches tagged RegRegionDef .rr ? Cons(rr, Nil) : Nil;
 function List#(RegMapDef_t) get_regmap_def(RegMapEntry_t#(aw, dw) regmap_entry) =
     regmap_entry matches tagged RegMapDef .rr ? Cons(rr, Nil) : Nil;
+function List#(ReadTrigger_t) get_read_trigger(RegMapEntry_t#(aw, dw) regmap_entry) =
+    regmap_entry matches tagged ReadTrigger .rr ? Cons(rr, Nil) : Nil;
+function List#(WriteTrigger_t) get_write_trigger(RegMapEntry_t#(aw, dw) regmap_entry) =
+    regmap_entry matches tagged WriteTrigger .rr ? Cons(rr, Nil) : Nil;
+
 
 typedef struct {
     String reg_defs;
@@ -564,6 +589,61 @@ module [BlueCSRCtx_t#(aw, dw)] csr_region_rw#(Integer offs, Integer len, functio
     Empty _ <- csr_region_def(offs, len, ident, desc);
 endmodule
 
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_trig#(Integer offs, Bool delay, BlueCSRTrigger_t rw, String ident, String name, String desc)(Reg#(Bit#(1)))
+    provisos(
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    Reg#(Bit#(1)) rg_trig;
+    
+    if(!delay)
+        rg_trig <- mkDWire(0);
+    else
+        rg_trig <- mkDReg(0);
+
+    function Action f_trigger();
+        action
+            rg_trig <= 1'b1;
+        endaction
+    endfunction
+
+    if(rw == TRIG_RO || rw == TRIG_RW) begin
+        RegMapEntry_t#(aw, dw) entry = tagged ReadTrigger ReadTrigger_t { offs: offs, delay: delay, trigger: f_trigger };
+        addToCollection(entry);
+    end if(rw == TRIG_WO || rw == TRIG_RW) begin
+        RegMapEntry_t#(aw, dw) entry = tagged WriteTrigger WriteTrigger_t { offs: offs, delay: delay, trigger: f_trigger };
+        addToCollection(entry);
+    end
+    return rg_trig;
+endmodule
+
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_trigr#(Integer offs, Bool delay, String ident, String name, String desc)(Reg#(Bit#(1)))
+    provisos(
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    let r <- csr_reg_trig(offs, delay, TRIG_RO, ident, name, desc);
+    return r;
+endmodule
+
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_trigw#(Integer offs, Bool delay, String ident, String name, String desc)(Reg#(Bit#(1)))
+    provisos(
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    let r <- csr_reg_trig(offs, delay, TRIG_WO, ident, name, desc);
+    return r;
+endmodule
+
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_trigrw#(Integer offs, Bool delay, String ident, String name, String desc)(Reg#(Bit#(1)))
+    provisos(
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    let r <- csr_reg_trig(offs, delay, TRIG_RW, ident, name, desc);
+    return r;
+endmodule
+
 function List#(ReadOpPure_t#(dw)) find_pure_reads_by_offs(List#(ReadOpPure_t#(dw)) l, Integer offs);
     function Bool p(ReadOpPure_t#(dw) read_op) = read_op.offs == offs;
     return List::filter(p, l);
@@ -576,6 +656,16 @@ endfunction
 
 function List#(WriteOp_t#(dw)) find_write_ops_by_offs(List#(WriteOp_t#(dw)) l, Integer offs);
     function Bool p(WriteOp_t#(dw) write_op) = write_op.offs == offs;
+    return List::filter(p, l);
+endfunction
+
+function List#(ReadTrigger_t) find_rtrig_by_offs(List#(ReadTrigger_t) l, Integer offs);
+    function Bool p(ReadTrigger_t rtrig) = rtrig.offs == offs;
+    return List::filter(p, l);
+endfunction
+
+function List#(WriteTrigger_t) find_wtrig_by_offs(List#(WriteTrigger_t) l, Integer offs);
+    function Bool p(WriteTrigger_t wtrig) = wtrig.offs == offs;
     return List::filter(p, l);
 endfunction
 
@@ -612,6 +702,8 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
     let read_regions    = List::concat(List::map(get_read_region, c));
     let write_ops       = List::concat(List::map(get_write_op, c));
     let write_regions   = List::concat(List::map(get_write_region, c));
+    let read_triggers   = List::concat(List::map(get_read_trigger, c));
+    let write_triggers  = List::concat(List::map(get_write_trigger, c));
 
     Integer word_bytes = valueOf(TDiv#(dw, 8));
 
@@ -656,6 +748,8 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
 
     for (Integer i = 0; i < List::length(regdefs); i = i + 1) begin
         let field_reads     = find_pure_reads_by_offs(pure_reads, regdefs[i].offset);
+        let rtrigs          = find_rtrig_by_offs(read_triggers, regdefs[i].offset);
+        let wtrigs          = find_wtrig_by_offs(write_triggers, regdefs[i].offset);
         let reg_policies    = find_policies_by_offs(access_policies, regdefs[i].offset, word_bytes);
 
         let read_policy     = List::length(reg_policies) > 0 ? reg_policies[0].read_policy : CSR_ALLOW_ALL;
@@ -665,6 +759,8 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
             rule rread_reg_allow((rg_valid == 1'b1) && (rg_wr == 1'b0) && (rg_addr == fromInteger(regdefs[i].offset)) && access_policy_allows(read_policy, rg_prot));
                 w_rdata <= combine_reads(field_reads);
                 w_resp <= CSR_OKAY;
+                if(List::length(rtrigs) > 0)
+                    rtrigs[0].trigger;
             endrule
             //when a read is denied, the default rule will fire
         endrules, read_rules);
@@ -674,6 +770,8 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
                 let reg_writes = find_write_ops_by_offs(write_ops, regdefs[i].offset);
                 dispatch_reg_writes(reg_writes, rg_wdata, rg_wstrb);
                 w_resp <= CSR_OKAY;
+                if(List::length(wtrigs) > 0)
+                    wtrigs[0].trigger;
             endrule
             //when a write is denied, the default rule will fire
         endrules, write_rules);

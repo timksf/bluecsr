@@ -15,6 +15,8 @@ interface ModConfig_ifc;
     method Bit#(4)  dma_en;
     method Bit#(8)  lock;
 
+    method Bit#(1)  sts_rstrb;
+
     method Action running(Bool b);
     method Action rxerr(Bool b);
 endinterface
@@ -30,6 +32,8 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
 
     Reg#(Bool)      rg_sts_rxerr;
     Reg#(Bool)      rg_sts_run;
+
+    Reg#(Bit#(1))   rg_sts_rstrb;
 
     RegFile#(Bit#(8), Bit#(8)) table0 <- mkRegFileFull;
 
@@ -50,11 +54,15 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
     rg_sts_run      <- csr_reg_ro ('h08, False, 0, "RUNN",  "Status Running",          "Indicates IP active status.");
     rg_sts_rxerr    <- csr_reg_w1c('h08, False, 4, "RXERR", "Status Receive Error",    "Indicates Reception Error.");
 
+    rg_sts_rstrb    <- csr_reg_trigr('h08, False,  "STSRD", "Status Read Access Strobe", "Indicates a bus read access to this register.");
+
     csr_region_rw('h100, 256, table0.sub, table0.upd, "Table0", "Table 0");
 
     method en       = rg_ctrl_en;
     method mode     = rg_ctrl_mode;
     method dma_en   = rg_ctrl_sub_en;
+
+    method sts_rstrb = rg_sts_rstrb;
 
     method running  = rg_sts_run._write;
     method rxerr    = rg_sts_rxerr._write;
@@ -87,6 +95,19 @@ module [Module] mkTestBlueCSR(Empty);
         expect_write_okay(cfg.external);
         
         read_csr_range(cfg.external, rg_addr, rg_data, 'h100, 'h11c);
+
+        issue_read(cfg.external, 'h08, CSR_INSECURE);
+        par
+            expect_read_okay(cfg.external);
+            action
+                if(cfg.internal.sts_rstrb != 1'b1) begin
+                    $display("Status register read strobe not asserted");
+                    $finish;
+                end
+            endaction
+        endpar
+
+        delay(5);
 
         // issue_read(cfg.external, 'h04, CSR_SECURE);
         // action

@@ -1,0 +1,38 @@
+[*]
+[*] GTKWave Analyzer v3.3.118 (w)1999-2023 BSI
+[*] Fri May  1 13:50:04 2026
+[*]
+[dumpfile] "/home/tim/Documents/HardwareDescription/BlueAXI_fork/bluecsr/dump.vcd"
+[dumpfile_mtime] "Fri May  1 13:47:05 2026"
+[dumpfile_size] 8290
+[savefile] "/home/tim/Documents/HardwareDescription/BlueAXI_fork/bluecsr/testbluescr.gtkw"
+[timestart] 0
+[size] 2560 1393
+[pos] 2509 -83
+*-5.857724 335 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[treeopen] main.
+[treeopen] main.top.
+[sst_width] 337
+[signals_width] 174
+[sst_expanded] 1
+[sst_vpaned_height] 433
+@28
+main.top.cfg.cfg_rg_valid
+@22
+main.top.cfg.cfg_rg_addr[31:0]
+@28
+main.top.cfg.cfg_rg_wr
+@22
+main.top.cfg.cfg_rg_wdata[31:0]
+@28
+main.top.cfg.cfg_rg_prot
+@22
+main.top.cfg.cfg_rg_wstrb[3:0]
+@200
+-response
+@22
+main.top.cfg.cfg_w_rdata[31:0]
+@28
+main.top.cfg.cfg_w_resp[1:0]
+[pattern_trace] 1
+[pattern_trace] 0
