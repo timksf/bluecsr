@@ -22,7 +22,7 @@ typedef enum {
     CSR_WO,
     CSR_W1S,
     CSR_W1C
-} BlueCSRAccess_t deriving(Eq, FShow);
+} BlueCSRAccess_t deriving(Bits, Eq, FShow);
 
 typedef enum {
     CSR_SECURE = 1'b0,
@@ -100,7 +100,7 @@ typedef struct {
     Integer offs;
     Integer length;
     function Bit#(dw) _(Bit#(aw) a) f_read;
-} ReadRegionPure_t#(numeric type aw, numeric type dw);
+} ReadRegion_t#(numeric type aw, numeric type dw);
 
 typedef struct {
     Integer offs;
@@ -109,23 +109,23 @@ typedef struct {
 } WriteRegion_t#(numeric type aw, numeric type dw);
 
 typedef union tagged {
-    RegMapDef_t       RegMapDef;
-    RegDef_t          RegDef;
-    RegRegionDef_t    RegRegionDef;
-    AccessPolicyDef_t AccessPolicyDef;
-    RegFieldDef_t     RegFieldDef;
-    ReadOpPure_t#(dw) ReadOpPure;
-    WriteOp_t#(dw)    WriteOp;
-    ReadRegionPure_t#(aw, dw) ReadRegionPure;
-    WriteRegion_t#(aw, dw) WriteRegion;
+    RegMapDef_t             RegMapDef;
+    RegDef_t                RegDef;
+    RegRegionDef_t          RegRegionDef;
+    AccessPolicyDef_t       AccessPolicyDef;
+    RegFieldDef_t           RegFieldDef;
+    ReadOpPure_t#(dw)       ReadOpPure;
+    WriteOp_t#(dw)          WriteOp;
+    ReadRegion_t#(aw, dw)   ReadRegion;
+    WriteRegion_t#(aw, dw)  WriteRegion;
 } RegMapEntry_t#(numeric type aw, numeric type dw);
 
 function List#(ReadOpPure_t#(dw)) get_pure_read(RegMapEntry_t#(aw, dw) regmap_entry) =
     regmap_entry matches tagged ReadOpPure .rr ? Cons(rr, Nil) : Nil;
 function List#(WriteOp_t#(dw)) get_write_op(RegMapEntry_t#(aw, dw) regmap_entry) =
     regmap_entry matches tagged WriteOp .rr ? Cons(rr, Nil) : Nil;
-function List#(ReadRegionPure_t#(aw, dw)) get_pure_read_region(RegMapEntry_t#(aw, dw) regmap_entry) =
-    regmap_entry matches tagged ReadRegionPure .rr ? Cons(rr, Nil) : Nil;
+function List#(ReadRegion_t#(aw, dw)) get_read_region(RegMapEntry_t#(aw, dw) regmap_entry) =
+    regmap_entry matches tagged ReadRegion .rr ? Cons(rr, Nil) : Nil;
 function List#(WriteRegion_t#(aw, dw)) get_write_region(RegMapEntry_t#(aw, dw) regmap_entry) =
     regmap_entry matches tagged WriteRegion .rr ? Cons(rr, Nil) : Nil;
 function List#(AccessPolicyDef_t) get_access_policy_def(RegMapEntry_t#(aw, dw) regmap_entry) =
@@ -512,11 +512,11 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c#(Integer offs, t rv, Integer bitpos, 
     return r;
 endmodule
 
-module [BlueCSRCtx_t#(aw, dw)] csr_region_ro#(Integer offs, Integer len, String ident, String desc, function Bit#(dw) read_fn(Bit#(aw) local_addr))();
+module [BlueCSRCtx_t#(aw, dw)] csr_region_ro#(Integer offs, Integer len, function Bit#(dw) read_fn(Bit#(aw) local_addr), String ident, String desc)();
     function Bit#(dw) do_read(Bit#(aw) local_addr);
         return read_fn(local_addr);
     endfunction
-    RegMapEntry_t#(aw, dw) read_region_entry = tagged ReadRegionPure ReadRegionPure_t {
+    RegMapEntry_t#(aw, dw) read_region_entry = tagged ReadRegion ReadRegion_t {
         offs: offs,
         length: len,
         f_read: do_read
@@ -525,7 +525,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_region_ro#(Integer offs, Integer len, String 
     Empty _ <- csr_region_def(offs, len, ident, desc);
 endmodule
 
-module [BlueCSRCtx_t#(aw, dw)] csr_region_wo#(Integer offs, Integer len, String ident, String desc, function Action write_fn(Bit#(aw) local_addr, Bit#(dw) data))();
+module [BlueCSRCtx_t#(aw, dw)] csr_region_wo#(Integer offs, Integer len, function Action write_fn(Bit#(aw) local_addr, Bit#(dw) data), String ident, String desc)();
     function Action do_write(Bit#(aw) local_addr, Bit#(dw) d);
         action
             write_fn(local_addr, d);
@@ -540,16 +540,16 @@ module [BlueCSRCtx_t#(aw, dw)] csr_region_wo#(Integer offs, Integer len, String 
     Empty _ <- csr_region_def(offs, len, ident, desc);
 endmodule
 
-module [BlueCSRCtx_t#(aw, dw)] csr_region_rw#(Integer offs, Integer len, String ident, String desc, function Bit#(dw) read_fn(Bit#(aw) local_addr), function Action write_fn(Bit#(aw) local_addr, Bit#(dw) data))();
+module [BlueCSRCtx_t#(aw, dw)] csr_region_rw#(Integer offs, Integer len, function Bit#(ldw) read_fn(Bit#(law) local_addr), function Action write_fn(Bit#(lawaw) local_addr, Bit#(ldw) data), String ident, String desc)();
     function Bit#(dw) do_read(Bit#(aw) local_addr);
-        return read_fn(local_addr);
+        return cExtend(read_fn(cExtend(local_addr)));
     endfunction
     function Action do_write(Bit#(aw) local_addr, Bit#(dw) d);
         action
-            write_fn(local_addr, d);
+            write_fn(cExtend(local_addr), cExtend(d));
         endaction
     endfunction
-    RegMapEntry_t#(aw, dw) read_region_entry = tagged ReadRegionPure ReadRegionPure_t {
+    RegMapEntry_t#(aw, dw) read_region_entry = tagged ReadRegion ReadRegion_t {
         offs: offs,
         length: len,
         f_read: do_read
@@ -579,8 +579,8 @@ function List#(WriteOp_t#(dw)) find_write_ops_by_offs(List#(WriteOp_t#(dw)) l, I
     return List::filter(p, l);
 endfunction
 
-function List#(ReadRegionPure_t#(aw, dw)) find_pure_read_regions_by_range(List#(ReadRegionPure_t#(aw, dw)) l, Integer offs, Integer len);
-    function Bool p(ReadRegionPure_t#(aw, dw) read_op) = read_op.offs == offs && read_op.length == len;
+function List#(ReadRegion_t#(aw, dw)) find_read_regions_by_range(List#(ReadRegion_t#(aw, dw)) l, Integer offs, Integer len);
+    function Bool p(ReadRegion_t#(aw, dw) read_op) = read_op.offs == offs && read_op.length == len;
     return List::filter(p, l);
 endfunction
 
@@ -597,15 +597,21 @@ endinterface
 typedef BusAccess_ifc#(BlueCSR_ifc#(aw, dw), int_ifc) BlueCSRAccess_ifc#(numeric type aw, numeric type dw, type int_ifc);
 
 module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc#(aw, dw, i));
+
     let {coll_device_ifc, c} <- getCollection(ctx);
 
-    let regdefs = List::concat(List::map(get_reg_def, c));
-    let regiondefs = List::concat(List::map(get_reg_region_def, c));
+    // let validation = validate_blue_csr_entries(c);
+    // if (!validation.valid) begin
+    //     errorM(validation.errors);
+    // end
+
+    let regdefs         = List::concat(List::map(get_reg_def, c));
+    let regiondefs      = List::concat(List::map(get_reg_region_def, c));
     let access_policies = List::concat(List::map(get_access_policy_def, c));
-    let pure_reads = List::concat(List::map(get_pure_read, c));
-    let pure_read_regions = List::concat(List::map(get_pure_read_region, c));
-    let write_ops = List::concat(List::map(get_write_op, c));
-    let write_regions = List::concat(List::map(get_write_region, c));
+    let pure_reads      = List::concat(List::map(get_pure_read, c));
+    let read_regions    = List::concat(List::map(get_read_region, c));
+    let write_ops       = List::concat(List::map(get_write_op, c));
+    let write_regions   = List::concat(List::map(get_write_region, c));
 
     Integer word_bytes = valueOf(TDiv#(dw, 8));
 
@@ -616,8 +622,8 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
     Reg#(Bit#(TDiv#(dw, 8)))    rg_wstrb    <- mkReg(0);
     Reg#(BlueCSRProt_t)         rg_prot     <- mkDReg(CSR_INSECURE);
 
-    Wire#(Bit#(dw)) w_rdata <- mkDWire(0);
-    Wire#(BlueCSRResponse_t) w_resp <- mkDWire(CSR_OKAY);
+    Wire#(Bit#(dw))             w_rdata <- mkDWire(0);
+    Wire#(BlueCSRResponse_t)    w_resp  <- mkDWire(CSR_SLVERR);
 
     function Bit#(dw) combine_reads(List#(ReadOpPure_t#(dw)) l);
         function Bit#(dw) fold_read(Bit#(dw) acc, ReadOpPure_t#(dw) rop);
@@ -637,7 +643,8 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
     endfunction
 
     function Bool is_word_aligned(Bit#(aw) addr);
-        return (bit_to_integer(addr) % word_bytes) == 0;
+        Bit#(aw) byte_mask = fromInteger(word_bytes - 1);
+        return (addr & byte_mask) == 0;
     endfunction
 
     function Bool is_region_addr(Bit#(aw) addr, Integer offs, Integer len);
@@ -648,10 +655,11 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
     Rules write_rules = emptyRules;
 
     for (Integer i = 0; i < List::length(regdefs); i = i + 1) begin
-        let field_reads = find_pure_reads_by_offs(pure_reads, regdefs[i].offset);
-        let reg_policies = find_policies_by_offs(access_policies, regdefs[i].offset, word_bytes);
-        let read_policy = List::length(reg_policies) > 0 ? reg_policies[0].read_policy : CSR_ALLOW_ALL;
-        let write_policy = List::length(reg_policies) > 0 ? reg_policies[0].write_policy : CSR_ALLOW_ALL;
+        let field_reads     = find_pure_reads_by_offs(pure_reads, regdefs[i].offset);
+        let reg_policies    = find_policies_by_offs(access_policies, regdefs[i].offset, word_bytes);
+
+        let read_policy     = List::length(reg_policies) > 0 ? reg_policies[0].read_policy : CSR_ALLOW_ALL;
+        let write_policy    = List::length(reg_policies) > 0 ? reg_policies[0].write_policy : CSR_ALLOW_ALL;
 
         read_rules = rJoinMutuallyExclusive(rules
             rule rread_reg_allow((rg_valid == 1'b1) && (rg_wr == 1'b0) && (rg_addr == fromInteger(regdefs[i].offset)) && access_policy_allows(read_policy, rg_prot));
@@ -672,31 +680,32 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
     end
 
     for (Integer i = 0; i < List::length(regiondefs); i = i + 1) begin
-        let region_reads = find_pure_read_regions_by_range(pure_read_regions, regiondefs[i].offset, regiondefs[i].length);
-        let region_writes = find_write_regions_by_range(write_regions, regiondefs[i].offset, regiondefs[i].length);
+        let region_reads    = find_read_regions_by_range(read_regions, regiondefs[i].offset, regiondefs[i].length);
+        let region_writes   = find_write_regions_by_range(write_regions, regiondefs[i].offset, regiondefs[i].length);
         let region_policies = find_policies_by_offs(access_policies, regiondefs[i].offset, regiondefs[i].length);
-        let read_policy = List::length(region_policies) > 0 ? region_policies[0].read_policy : CSR_ALLOW_ALL;
-        let write_policy = List::length(region_policies) > 0 ? region_policies[0].write_policy : CSR_ALLOW_ALL;
+
+        let read_policy     = List::length(region_policies) > 0 ? region_policies[0].read_policy : CSR_ALLOW_ALL;
+        let write_policy    = List::length(region_policies) > 0 ? region_policies[0].write_policy : CSR_ALLOW_ALL;
+
+        Bit#(aw) local_addr = rg_addr - fromInteger(regiondefs[i].offset);
 
         read_rules = rJoinMutuallyExclusive(rules
             rule rread_region_allow((rg_valid == 1'b1) && (rg_wr == 1'b0) && is_region_addr(rg_addr, regiondefs[i].offset, regiondefs[i].length) && is_word_aligned(rg_addr) && access_policy_allows(read_policy, rg_prot));
-                Bit#(dw) read_data = (List::length(region_reads) > 0) ? region_reads[0].f_read(rg_addr - fromInteger(regiondefs[i].offset)) : 0;
+                Bit#(dw) read_data = (List::length(region_reads) > 0) ? region_reads[0].f_read(local_addr) : 0;
                 w_rdata <= read_data;
                 w_resp <= CSR_OKAY;
             endrule
         endrules, read_rules);
 
-        // write_rules = rJoinMutuallyExclusive(rules
-        //     rule rwrite_region_allow((rg_valid == 1'b1) && (rg_wr == 1'b1) && is_region_addr(rg_addr, regiondefs[i].offset, regiondefs[i].length) && is_word_aligned(rg_addr) && (rg_wstrb == '1) && access_policy_allows(write_policy, rg_prot));
-        //         if (List::length(region_writes) > 0) begin
-        //             region_writes[0].f_write(rg_addr - fromInteger(regiondefs[i].offset), rg_wdata);
-        //         end
-        //         w_resp <= CSR_OKAY;
-        //     endrule
-        //     rule rwrite_region_deny((rg_valid == 1'b1) && (rg_wr == 1'b1) && is_region_addr(rg_addr, regiondefs[i].offset, regiondefs[i].length) && (!is_word_aligned(rg_addr) || (rg_wstrb != '1) || !access_policy_allows(write_policy, rg_prot)));
-        //         w_resp <= CSR_SLVERR;
-        //     endrule
-        // endrules, write_rules);
+        write_rules = rJoinMutuallyExclusive(rules
+            rule rwrite_region_allow((rg_valid == 1'b1) && (rg_wr == 1'b1) && is_region_addr(rg_addr, regiondefs[i].offset, regiondefs[i].length) && is_word_aligned(rg_addr) && rg_wstrb == unpack(-1) && access_policy_allows(write_policy, rg_prot));
+                if (List::length(region_writes) > 0) begin
+                    region_writes[0].f_write(rg_addr - fromInteger(regiondefs[i].offset), rg_wdata);
+                end
+                w_resp <= CSR_OKAY;
+                //region writes are only allowed for fully enabled strobes
+            endrule
+        endrules, write_rules);
     end
 
     read_rules = rJoinDescendingUrgency(read_rules,
@@ -720,41 +729,16 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
     addRules(write_rules);
 
     interface BlueCSR_ifc external;
-        method Action valid(Bit#(1) valid_i);
-            rg_valid <= valid_i;
-        endmethod
+        method valid    = rg_valid._write;
+        method wr       = rg_wr._write;
+        method addr     = rg_addr._write;
+        method wdata    = rg_wdata._write;
+        method wstrb    = rg_wstrb._write;
+        method prot     = rg_prot._write;
 
-        method Action wr(Bit#(1) wr_i);
-            rg_wr <= wr_i;
-        endmethod
-
-        method Action addr(Bit#(aw) addr_i);
-            rg_addr <= addr_i;
-        endmethod
-
-        method Action wdata(Bit#(dw) data_i);
-            rg_wdata <= data_i;
-        endmethod
-
-        method Action wstrb(Bit#(TDiv#(dw, 8)) strb_i);
-            rg_wstrb <= strb_i;
-        endmethod
-
-        method Action prot(BlueCSRProt_t prot_i);
-            rg_prot <= prot_i;
-        endmethod
-
-        method Bit#(1) ready;
-            return 1'b1;
-        endmethod
-
-        method Bit#(dw) rdata;
-            return ((rg_valid == 1'b1) && (rg_wr == 1'b0)) ? w_rdata : 0;
-        endmethod
-
-        method BlueCSRResponse_t resp;
-            return (rg_valid == 1'b1) ? w_resp : CSR_OKAY;
-        endmethod
+        method ready    = 1'b1;
+        method rdata    = ((rg_valid == 1'b1) && (rg_wr == 1'b0)) ? w_rdata : 0;
+        method resp     = (rg_valid == 1'b1) ? w_resp : CSR_OKAY;
     endinterface
 
     interface internal = coll_device_ifc;

@@ -13,7 +13,7 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
     let regfields           = List::concat(List::map(get_regfield_def, c));
     let pure_reads          = List::concat(List::map(get_pure_read, c));
     let writes              = List::concat(List::map(get_write_op, c));
-    let pure_read_regions   = List::concat(List::map(get_pure_read_region, c));
+    let read_regions        = List::concat(List::map(get_read_region, c));
     let write_regions       = List::concat(List::map(get_write_region, c));
 
     Integer word_bytes = valueOf(TDiv#(dw, 8));
@@ -108,9 +108,9 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
         end
     end
 
-    for(Integer i = 0; i < length(pure_read_regions); i = i + 1) begin
-        if(count_regions_exact(regiondefs, pure_read_regions[i].offs, pure_read_regions[i].length) != 1) begin
-            errors = append_newline(errors, "BlueCSR validation failed: pure read region at offset 0x" + integerToString(pure_read_regions[i].offs) + " does not resolve to exactly one csr_region_def.");
+    for(Integer i = 0; i < length(read_regions); i = i + 1) begin
+        if(count_regions_exact(regiondefs, read_regions[i].offs, read_regions[i].length) != 1) begin
+            errors = append_newline(errors, "BlueCSR validation failed: pure read region at offset 0x" + integerToString(read_regions[i].offs) + " does not resolve to exactly one csr_region_def.");
         end
     end
 
@@ -124,8 +124,8 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
         let region = regiondefs[i];
         Bool has_read = False;
         Bool has_write = False;
-        for(Integer j = 0; j < length(pure_read_regions); j = j + 1) begin
-            has_read = has_read || ((pure_read_regions[j].offs == region.offset) && (pure_read_regions[j].length == region.length));
+        for(Integer j = 0; j < length(read_regions); j = j + 1) begin
+            has_read = has_read || ((read_regions[j].offs == region.offset) && (read_regions[j].length == region.length));
         end
         for(Integer j = 0; j < length(write_regions); j = j + 1) begin
             has_write = has_write || ((write_regions[j].offs == region.offset) && (write_regions[j].length == region.length));

@@ -1,6 +1,7 @@
 package TestBlueCSR;
 
 import StmtFSM :: *;
+import RegFile :: *;
 
 import BlueCSR :: *;
 import BlueCSRTb :: *;
@@ -18,35 +19,6 @@ interface ModConfig_ifc;
     method Action rxerr(Bool b);
 endinterface
 
-typedef enum {
-    BLUE,
-    RED,
-    YELLOW,
-    GREEN,
-    NORMAL
-} DisplayColors deriving(Bits, Eq, FShow);
-
-function Action printColor(DisplayColors color, Fmt text);
-    action
-        Fmt colorFmt = ?;
-        case(color)
-            BLUE: colorFmt = $format("%c[34m",27);
-            RED: colorFmt = $format("%c[31m",27);
-            YELLOW: colorFmt = $format("%c[33m",27);
-            GREEN: colorFmt = $format("%c[32m",27);
-            NORMAL: colorFmt = $format("");
-        endcase
-        $display(colorFmt + text + $format("%c[0m",27));
-    endaction
-endfunction
-
-function Action printColorTimed(DisplayColors color, Fmt text);
-    action
-        let s <- $time;
-        printColor(color, $format("(%0d) ", s) + text);
-    endaction
-endfunction
-
 module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
 
     Empty e = ?;
@@ -59,13 +31,15 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
     Reg#(Bool)      rg_sts_rxerr;
     Reg#(Bool)      rg_sts_run;
 
+    RegFile#(Bit#(8), Bit#(8)) table0 <- mkRegFileFull;
+
     csr_regmap_def("testBlueCSR", "Test BlueCSR register map");
 
     csr_reg_def('h00, "MIV", "Module ID and Version Register");
     csr_reg_rc('h00, Bit#(12)'('hABC),   0, "MID", "Module ID",       "Unique ID for this module.");
     csr_reg_rc('h00, Bit#(12)'('hDDA),  16, "VRS", "Module Version",  "Module release version.");
 
-    csr_reg_def('h04, "CTRL", "Module control register");
+    csr_reg_def ('h04, "CTRL", "Module control register");
     rg_ctrl_en      <- csr_reg_rw('h04, False,  0, "CTRLEN",    "Control Enable",               "Controls whether module is enabled or not.");
     rg_ctrl_mode    <- csr_reg_rw('h04, Mode1,  4, "MODE",      "Control Mode Setting",         "Controls operating mode.");
     rg_ctrl_sub_en  <- csr_reg_ws('h04,     0, 16, "DMAEN",     "Control DMA Engine Enable",    "Controls whether DMA engine inside module is enabled.");
@@ -75,6 +49,8 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
     csr_reg_def('h08, "STS", "Module status register");
     rg_sts_run      <- csr_reg_ro ('h08, False, 0, "RUNN",  "Status Running",          "Indicates IP active status.");
     rg_sts_rxerr    <- csr_reg_w1c('h08, False, 4, "RXERR", "Status Receive Error",    "Indicates Reception Error.");
+
+    csr_region_rw('h100, 256, table0.sub, table0.upd, "Table0", "Table 0");
 
     method en       = rg_ctrl_en;
     method mode     = rg_ctrl_mode;
@@ -104,16 +80,13 @@ module [Module] mkTestBlueCSR(Empty);
     Reg#(Bit#(32)) rg_data <- mkReg(0);
 
     Stmt s = seq
-        printColorTimed(BLUE, $format("Hello World!"));
 
         read_csr_range(cfg.external, rg_addr, rg_data, 0, 8);
 
-        // issue_read(0, CSR_SECURE);
-        // action
-        //     let bus0 <- accept_read_response();
-        //     $display("BUS[0x00]: %08x", tpl_1(bus0));
-        // endaction
-        // drive_idle();
+        issue_write(cfg.external, 'h100, 'hAABBCCDD, 4'b1111, CSR_SECURE);
+        expect_write_okay(cfg.external);
+        
+        read_csr_range(cfg.external, rg_addr, rg_data, 'h100, 'h11c);
 
         // issue_read(cfg.external, 'h04, CSR_SECURE);
         // action

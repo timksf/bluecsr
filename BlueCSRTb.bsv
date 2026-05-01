@@ -49,6 +49,19 @@ function ActionValue#(BlueCSRResponse_t) accept_write_response(BlueCSR_ifc#(aw, 
     endactionvalue
 endfunction
 
+function Stmt expect_write_okay(BlueCSR_ifc#(aw, dw) cfg);
+    Stmt s = seq
+        action
+            let bus_resp <- accept_write_response(cfg);
+            if(bus_resp != CSR_OKAY) begin
+                $write("Expected OKAY response to write but got "); $display(fshow(bus_resp));
+                $finish();
+            end
+        endaction
+    endseq;
+    return s;
+endfunction
+
 function Stmt read_csr_range(BlueCSR_ifc#(aw, dw) cfg, Reg#(Bit#(aw)) rg_addr, Reg#(Bit#(dw)) rg_data, Integer lo_addr, Integer hi_addr);
     Stmt s = seq
         rg_addr <= fromInteger(lo_addr);

@@ -15,7 +15,7 @@ module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
     let regfields   = List::concat(List::map(get_regfield_def, c));
 
     if (!validation.valid) begin
-        messageM(validation.errors);
+        errorM(validation.errors);
     end
 
     function String repeatString(String value, Integer count);
@@ -127,7 +127,7 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
     let regfields           = List::concat(List::map(get_regfield_def, c));
     let pure_reads          = List::concat(List::map(get_pure_read, c));
     let writes              = List::concat(List::map(get_write_op, c));
-    let pure_read_regions   = List::concat(List::map(get_pure_read_region, c));
+    let read_regions   = List::concat(List::map(get_read_region, c));
     let write_regions       = List::concat(List::map(get_write_region, c));
 
     Reg#(Bool) rg_done <- mkReg(False);
@@ -159,8 +159,8 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
 
     function Bool has_region_read_access(Integer offs, Integer len);
         Bool found = False;
-        for(Integer i = 0; i < length(pure_read_regions); i = i + 1) begin
-            found = found || ((pure_read_regions[i].offs == offs) && (pure_read_regions[i].length == len));
+        for(Integer i = 0; i < length(read_regions); i = i + 1) begin
+            found = found || ((read_regions[i].offs == offs) && (read_regions[i].length == len));
         end
         return found;
     endfunction
