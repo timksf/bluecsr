@@ -41,8 +41,21 @@ typedef enum {
     TRIG_RW
 } BlueCSRTrigger_t deriving(Bits, Eq, FShow);
 
+typedef struct {
+    Bool wr;
+    Bit#(aw) addr;
+    Bit#(dw) wdata;
+    Bit#(TDiv#(dw, 8)) strb;
+    BlueCSRProt_t prot;
+} BlueCSR_Req_t#(numeric type aw, numeric type dw) deriving(Eq, Bits, FShow);
+
+typedef struct {
+    Bit#(dw) rdata;
+    BlueCSRResponse_t resp;
+} BlueCSR_Rsp_t#(numeric type dw) deriving(Eq, Bits, FShow);
+
 (*always_enabled*)
-interface BlueCSR_ifc#(numeric type aw, numeric type dw);
+interface BlueCSR_Fab_ifc#(numeric type aw, numeric type dw);
     (*prefix = ""*) method Action valid ((*port = "i_valid"*)   Bit#(1)             valid   );
     (*prefix = ""*) method Action wr    ((*port = "i_wr"*)      Bit#(1)             wr      );
     (*prefix = ""*) method Action addr  ((*port = "i_addr"*)    Bit#(aw)            addr    );
@@ -53,6 +66,12 @@ interface BlueCSR_ifc#(numeric type aw, numeric type dw);
     (*result = "o_rdy"*)    method Bit#(1)              ready;
     (*result = "o_data"*)   method Bit#(dw)             rdata;
     (*result = "o_resp"*)   method BlueCSRResponse_t    resp;
+endinterface
+
+interface BlueCSR_ifc#(numeric type aw, numeric type dw);
+    //no pure server to allow easy expansion of this interface
+    interface Put#(BlueCSR_Req_t#(aw, dw))  request;
+    interface Get#(BlueCSR_Rsp_t#(dw))      response;
 endinterface
 
 typedef ModuleCollect#(RegMapEntry_t#(aw, dw), ifc) BlueCSRCtx_t#(numeric type aw, numeric type dw, type ifc);
