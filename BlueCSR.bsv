@@ -4,6 +4,7 @@ import List :: *;
 import DReg :: *;
 import BUtils :: *;
 import Vector :: *;
+import GetPut :: *;
 import ModuleCollect :: *;
 
 typedef enum {
@@ -703,7 +704,7 @@ interface BusAccess_ifc#(type ext_ifc, type int_ifc);
     interface int_ifc internal;
 endinterface
 
-typedef BusAccess_ifc#(BlueCSR_ifc#(aw, dw), int_ifc) BlueCSRAccess_ifc#(numeric type aw, numeric type dw, type int_ifc);
+typedef BusAccess_ifc#(BlueCSR_Fab_ifc#(aw, dw), int_ifc) BlueCSRAccess_ifc#(numeric type aw, numeric type dw, type int_ifc);
 
 module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc#(aw, dw, i));
 
@@ -845,7 +846,7 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
     addRules(read_rules);
     addRules(write_rules);
 
-    interface BlueCSR_ifc external;
+    interface BlueCSR_Fab_ifc external;
         method valid    = rg_valid._write;
         method wr       = rg_wr._write;
         method addr     = rg_addr._write;
