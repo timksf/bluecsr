@@ -2,10 +2,14 @@ package TestBlueCSR;
 
 import StmtFSM :: *;
 import RegFile :: *;
+import Connectable :: *;
+
+import BlueAXI :: *;
 
 import BlueCSR :: *;
 import BlueCSRTb :: *;
 import BlueCSRExport :: *;
+import BlueCSRAXI4LiteAdapter :: *;
 
 typedef enum { Mode0, Mode1, Mode2 } Mode_t deriving(Bits, Eq, FShow);
 
@@ -83,9 +87,16 @@ endmodule
 module [Module] mkTestBlueCSR(Empty);
 
     let cfg <- mk_config;
+    let axi_cfg <- mkBlueCSRAXI4LiteAdapter(cfg.external, 1, 1);
+
+    AXI4_Lite_Master_Rd#(32, 32) m_rd <- mkAXI4_Lite_Master_Rd(1);
+    AXI4_Lite_Master_Wr#(32, 32) m_wr <- mkAXI4_Lite_Master_Wr(1);
 
     Reg#(Bit#(32)) rg_addr <- mkReg(0);
     Reg#(Bit#(32)) rg_data <- mkReg(0);
+
+    mkConnection(m_rd.fab, axi_cfg.s_rd);
+    mkConnection(m_wr.fab, axi_cfg.s_wr);
 
     Stmt s = seq
 
@@ -109,60 +120,6 @@ module [Module] mkTestBlueCSR(Empty);
 
         delay(5);
 
-        // issue_read(cfg.external, 'h04, CSR_SECURE);
-        // action
-        //     let ctrl_reset_rsp <- accept_read_response(cfg.external);
-        //     if(tpl_2(ctrl_reset_rsp) != CSR_OKAY) begin
-        //         printColorTimed(RED, $format("Sanity fail: reset CTRL read expected OKAY"));
-        //         $finish();
-        //     end
-        //     if(tpl_1(ctrl_reset_rsp) != 'h00000010) begin
-        //         printColorTimed(RED, $format("Sanity fail: reset CTRL expected 0x00000010 got %08x", tpl_1(ctrl_reset_rsp)));
-        //         $finish();
-        //     end
-        // endaction
-
-        // issue_write('h04, 'h00000021, 'b1111, CSR_INSECURE);
-        // action
-        //     let denied_ctrl <- accept_write_response();
-        //     if(denied_ctrl != CSR_SLVERR) begin
-        //         printColorTimed(RED, $format("Sanity fail: insecure CTRL write expected SLVERR"));
-        //         $finish();
-        //     end
-        // endaction
-        // drive_idle();
-
-        // issue_write('h04, 'h00000021, 'b1111, CSR_SECURE);
-        // action
-        //     let allowed_ctrl <- accept_write_response();
-        //     if(allowed_ctrl != CSR_OKAY) begin
-        //         printColorTimed(RED, $format("Sanity fail: secure CTRL write expected OKAY"));
-        //         $finish();
-        //     end
-        // endaction
-        // drive_idle();
-
-        // issue_read('h04, CSR_INSECURE);
-        // action
-        //     let ctrl_after <- accept_read_response();
-        //     if(tpl_2(ctrl_after) != CSR_OKAY) begin
-        //         printColorTimed(RED, $format("Sanity fail: CTRL read expected OKAY"));
-        //         $finish();
-        //     end
-        //     if(tpl_1(ctrl_after) != 'h00000021) begin
-        //         printColorTimed(RED, $format("Sanity fail: CTRL write expected 0x00000021 got %08x", tpl_1(ctrl_after)));
-        //         $finish();
-        //     end
-        //     if(cfg.internal.en != True) begin
-        //         printColorTimed(RED, $format("Sanity fail: internal en expected True"));
-        //         $finish();
-        //     end
-        //     if(cfg.internal.mode != Mode2) begin
-        //         printColorTimed(RED, $format("Sanity fail: internal mode expected Mode2"));
-        //         $finish();
-        //     end
-        // endaction
-        // drive_idle();
     endseq;
 
     mkAutoFSM(s);
