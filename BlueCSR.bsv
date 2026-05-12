@@ -548,6 +548,17 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_wc#(Integer offs, t rv, Integer bitpos, S
     return r;
 endmodule
 
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_wo#(Integer offs, t rv, Integer bitpos, String ident, String name, String desc)()
+    provisos(
+        Bits#(t, sz_t),
+        FieldReadPure#(t, dw),
+        Add#(sz_t, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    Reg#(t) _r <- csr_reg_field(CSR_WO, offs, rv, bitpos, ident, name, desc);
+endmodule
+
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c#(Integer offs, t rv, Integer bitpos, String ident, String fname, String desc)(Reg#(t))
     provisos(
         Bits#(t, sz_t),
@@ -557,6 +568,18 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c#(Integer offs, t rv, Integer bitpos, 
         Div#(dw, 8, TDiv#(dw, 8))
     );
     let r <- csr_reg_field(CSR_W1C, offs, rv, bitpos, ident, fname, desc);
+    return r;
+endmodule
+
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1s#(Integer offs, t rv, Integer bitpos, String ident, String fname, String desc)(Reg#(t))
+    provisos(
+        Bits#(t, sz_t),
+        FieldReadPure#(t, dw),
+        Add#(sz_t, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    let r <- csr_reg_field(CSR_W1S, offs, rv, bitpos, ident, fname, desc);
     return r;
 endmodule
 
