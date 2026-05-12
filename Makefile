@@ -17,22 +17,24 @@ SIM_DIR_V = $(SIM_DIR)/verilog
 
 VSIM = iverilog
 CLEAR =
-ARGS ?= -show-schedule -Xc++ -Wno-format-truncation -Xc++ -Wno-dangling-else
-ARGSC ?= -show-schedule
+ARGS ?= -u -show-schedule -Xc++ -Wno-format-truncation -Xc++ -Wno-dangling-else
+ARGSC ?= -u -show-schedule
 #-no-warn-action-shadowing
 ARGSCV ?= -show-schedule -remove-dollar
 
 BLUELIB_DIR=
 BLUEAXI_DIR=
 BLUEIMPORT=$(BLUELIB_DIR):$(BLUEAXI_DIR):+
+SOURCE_DIRS := . $(foreach dir,$(BLUELIB_DIR) $(BLUEAXI_DIR),$(if $(strip $(dir)),$(dir)))
+BSV_SRCS := $(sort $(foreach dir,$(SOURCE_DIRS),$(wildcard $(dir)/*.bsv)))
 
 all: $(EXE)
 
 allV: $(EXE_V)
 
-$(BUILD_DIR)/$(MOD_NAME).ba: $(TOP_FILE)
+$(BUILD_DIR)/$(MOD_NAME).ba: $(BSV_SRCS) Makefile
 	@mkdir -p $(BUILD_DIR)
-	$(CMP) -p $(BLUEIMPORT) -bdir $(BUILD_DIR) -sim -g $(MOD_NAME) $(ARGSC) -u $<
+	$(CMP) -p $(BLUEIMPORT) -bdir $(BUILD_DIR) -sim -g $(MOD_NAME) $(ARGSC) -u $(TOP_FILE)
 
 clean:
 	rm -f $(EXE) $(EXE_V) *.so *.sched

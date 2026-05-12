@@ -71,7 +71,7 @@ endmodule
 
 (* synthesize *)
 module mk_config(BlueCSRAccess_ifc#(32, 32, ModConfig_ifc));
-    BlueCSRAccess_ifc#(32, 32, ModConfig_ifc) cfg <- create_blue_csr(module_config);
+    BlueCSRAccess_ifc#(32, 32, ModConfig_ifc) cfg <- create_blue_csr(module_config, False);
     BlueCSRExport_ifc rdl_export <- export_systemrdl_blue_csr(module_config, "sim/testBlueCSR.rdl");
 
     RegMapDoc_t#(32) doc <- doc_blue_csr(module_config);
@@ -96,9 +96,8 @@ module [Module] mkTestBlueCSR(Empty);
         
         read_csr_range(cfg.external, rg_addr, rg_data, 'h100, 'h11c);
 
-        issue_read(cfg.external, 'h08, CSR_INSECURE);
         par
-            expect_read_okay(cfg.external);
+            issue_read(cfg.external, 'h08, CSR_INSECURE);
             action
                 if(cfg.internal.sts_rstrb != 1'b1) begin
                     $display("Status register read strobe not asserted");
@@ -106,6 +105,7 @@ module [Module] mkTestBlueCSR(Empty);
                 end
             endaction
         endpar
+        expect_read_okay(cfg.external);
 
         delay(5);
 
@@ -121,7 +121,6 @@ module [Module] mkTestBlueCSR(Empty);
         //         $finish();
         //     end
         // endaction
-        drive_idle(cfg.external);
 
         // issue_write('h04, 'h00000021, 'b1111, CSR_INSECURE);
         // action

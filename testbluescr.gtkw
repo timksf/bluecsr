@@ -1,39 +1,35 @@
 [*]
 [*] GTKWave Analyzer v3.3.118 (w)1999-2023 BSI
-[*] Fri May  1 13:59:13 2026
+[*] Tue May 12 17:48:22 2026
 [*]
 [dumpfile] "/home/tim/Documents/HardwareDescription/BlueAXI_fork/bluecsr/dump.vcd"
-[dumpfile_mtime] "Fri May  1 13:59:03 2026"
-[dumpfile_size] 9688
+[dumpfile_mtime] "Tue May 12 17:38:08 2026"
+[dumpfile_size] 24093
 [savefile] "/home/tim/Documents/HardwareDescription/BlueAXI_fork/bluecsr/testbluescr.gtkw"
 [timestart] 0
 [size] 2560 1393
 [pos] -1 -1
-*-5.557724 112 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+*-5.557724 148 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
 [treeopen] main.
 [treeopen] main.top.
+[treeopen] main.top.cfg.
 [sst_width] 337
-[signals_width] 238
+[signals_width] 310
 [sst_expanded] 1
 [sst_vpaned_height] 433
 @28
-main.top.cfg.cfg_rg_valid
+main.top.cfg.CLK
+main.top.cfg.RST_N
+@200
+-TB
 @22
-main.top.cfg.cfg_rg_addr[31:0]
-@28
-main.top.cfg.cfg_rg_wr
-@22
-main.top.cfg.cfg_rg_wdata[31:0]
-@28
-main.top.cfg.cfg_rg_prot
-@22
-main.top.cfg.cfg_rg_wstrb[3:0]
+main.top.rg_addr[31:0]
+main.top.rg_data[31:0]
 @200
 -response
-@22
-main.top.cfg.cfg_w_rdata[31:0]
 @28
-main.top.cfg.cfg_w_resp[1:0]
 main.top.cfg.cfg_rg_sts_rstrb_r_rg_trig
+@23
+main.top.cfg.cfg_f_rsp_rv.Q_OUT_0[34:0]
 [pattern_trace] 1
 [pattern_trace] 0

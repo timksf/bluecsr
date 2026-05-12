@@ -2,9 +2,12 @@ package BlueCSR;
 
 import List :: *;
 import DReg :: *;
+import FIFO :: *;
+import FIFOF :: *;
 import BUtils :: *;
 import Vector :: *;
 import GetPut :: *;
+import SpecialFIFOs :: *;
 import ModuleCollect :: *;
 
 typedef enum {
@@ -46,7 +49,7 @@ typedef struct {
     Bool wr;
     Bit#(aw) addr;
     Bit#(dw) wdata;
-    Bit#(TDiv#(dw, 8)) strb;
+    Bit#(TDiv#(dw, 8)) wstrb;
     BlueCSRProt_t prot;
 } BlueCSR_Req_t#(numeric type aw, numeric type dw) deriving(Eq, Bits, FShow);
 
@@ -704,9 +707,13 @@ interface BusAccess_ifc#(type ext_ifc, type int_ifc);
     interface int_ifc internal;
 endinterface
 
-typedef BusAccess_ifc#(BlueCSR_Fab_ifc#(aw, dw), int_ifc) BlueCSRAccess_ifc#(numeric type aw, numeric type dw, type int_ifc);
+typedef BusAccess_ifc#(BlueCSR_Fab_ifc#(aw, dw), int_ifc)   BlueCSRAccess_Fab_ifc#(numeric type aw, numeric type dw, type int_ifc);
+typedef BusAccess_ifc#(BlueCSR_ifc#(aw, dw), int_ifc)       BlueCSRAccess_ifc#(numeric type aw, numeric type dw, type int_ifc);
 
-module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc#(aw, dw, i));
+module [Module] create_blue_csr#(
+        BlueCSRCtx_t#(aw, dw, i) ctx,
+        Bool buffer_in
+    )(BlueCSRAccess_ifc#(aw, dw, i));
 
     let {coll_device_ifc, c} <- getCollection(ctx);
 
@@ -727,15 +734,27 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
 
     Integer word_bytes = valueOf(TDiv#(dw, 8));
 
-    Reg#(Bit#(1))               rg_valid    <- mkDReg(0);
-    Reg#(Bit#(1))               rg_wr       <- mkReg(0);
-    Reg#(Bit#(aw))              rg_addr     <- mkReg(0);
-    Reg#(Bit#(dw))              rg_wdata    <- mkReg(0);
-    Reg#(Bit#(TDiv#(dw, 8)))    rg_wstrb    <- mkReg(0);
-    Reg#(BlueCSRProt_t)         rg_prot     <- mkDReg(CSR_INSECURE);
+    FIFOF#(BlueCSR_Req_t#(aw, dw))  f_req;
+    FIFOF#(BlueCSR_Rsp_t#(dw))      f_rsp <- mkBypassFIFOF;
 
-    Wire#(Bit#(dw))             w_rdata <- mkDWire(0);
-    Wire#(BlueCSRResponse_t)    w_resp  <- mkDWire(CSR_SLVERR);
+    //the requests are still buffered with the bypass fifo 
+    //but only when there is no space in the output. Otherwise, the
+    //request is processed combinationally
+    if(!buffer_in)
+        f_req <- mkBypassFIFOF;
+    else
+        f_req <- mkSizedFIFOF(1);
+
+
+    // Reg#(Bit#(1))               rg_valid    <- mkDReg(0);
+    // Reg#(Bit#(1))               rg_wr       <- mkReg(0);
+    // Reg#(Bit#(aw))              rg_addr     <- mkReg(0);
+    // Reg#(Bit#(dw))              rg_wdata    <- mkReg(0);
+    // Reg#(Bit#(TDiv#(dw, 8)))    rg_wstrb    <- mkReg(0);
+    // Reg#(BlueCSRProt_t)         rg_prot     <- mkDReg(CSR_INSECURE);
+
+    // Wire#(Bit#(dw))             w_rdata <- mkDWire(0);
+    // Wire#(BlueCSRResponse_t)    w_resp  <- mkDWire(CSR_SLVERR);
 
     function Bit#(dw) combine_reads(List#(ReadOpPure_t#(dw)) l);
         function Bit#(dw) fold_read(Bit#(dw) acc, ReadOpPure_t#(dw) rop);
@@ -775,23 +794,41 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
         let read_policy     = List::length(reg_policies) > 0 ? reg_policies[0].read_policy : CSR_ALLOW_ALL;
         let write_policy    = List::length(reg_policies) > 0 ? reg_policies[0].write_policy : CSR_ALLOW_ALL;
 
+        let req             = f_req.first;
+        let req_hit         = (req.addr == fromInteger(regdefs[i].offset));
+        let req_rd_allowed  = access_policy_allows(read_policy,  req.prot);
+        let req_wr_allowed  = access_policy_allows(write_policy, req.prot);
+
+        //TODO: should triggers align with data output? (difficult as it moves through arbitrarily delayed FIFOs)
+
         read_rules = rJoinMutuallyExclusive(rules
-            rule rread_reg_allow((rg_valid == 1'b1) && (rg_wr == 1'b0) && (rg_addr == fromInteger(regdefs[i].offset)) && access_policy_allows(read_policy, rg_prot));
-                w_rdata <= combine_reads(field_reads);
-                w_resp <= CSR_OKAY;
+            rule rread_reg_allow(!req.wr && req_hit && req_rd_allowed);
+                f_rsp.enq(
+                    BlueCSR_Rsp_t {
+                        rdata:  combine_reads(field_reads),
+                        resp:   CSR_OKAY
+                    }
+                );
                 if(List::length(rtrigs) > 0)
                     rtrigs[0].trigger;
+                f_req.deq;
             endrule
             //when a read is denied, the default rule will fire
         endrules, read_rules);
 
         write_rules = rJoinMutuallyExclusive(rules
-            rule rwrite_reg_allow((rg_valid == 1'b1) && (rg_wr == 1'b1) && (rg_addr == fromInteger(regdefs[i].offset)) && access_policy_allows(write_policy, rg_prot));
+            rule rwrite_reg_allow(req.wr && req_hit && req_wr_allowed);
                 let reg_writes = find_write_ops_by_offs(write_ops, regdefs[i].offset);
-                dispatch_reg_writes(reg_writes, rg_wdata, rg_wstrb);
-                w_resp <= CSR_OKAY;
+                dispatch_reg_writes(reg_writes, req.wdata, req.wstrb);
+                f_rsp.enq(
+                    BlueCSR_Rsp_t {
+                        rdata:  ?,
+                        resp:   CSR_OKAY
+                    }
+                );
                 if(List::length(wtrigs) > 0)
                     wtrigs[0].trigger;
+                f_req.deq;
             endrule
             //when a write is denied, the default rule will fire
         endrules, write_rules);
@@ -805,22 +842,40 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
         let read_policy     = List::length(region_policies) > 0 ? region_policies[0].read_policy : CSR_ALLOW_ALL;
         let write_policy    = List::length(region_policies) > 0 ? region_policies[0].write_policy : CSR_ALLOW_ALL;
 
-        Bit#(aw) local_addr = rg_addr - fromInteger(regiondefs[i].offset);
+        let req             = f_req.first;
+        Bit#(aw) local_addr = req.addr - fromInteger(regiondefs[i].offset);
+        let req_hit         = is_region_addr(req.addr, regiondefs[i].offset, regiondefs[i].length);
+        let req_aligned     = is_word_aligned(req.addr);
+        let req_rd_allowed  = access_policy_allows(read_policy,  req.prot);
+        let req_wr_allowed  = access_policy_allows(write_policy, req.prot);
+        //region writes are only valid for entire words
+        let req_wr_valid    = req.wstrb == unpack(-1);
 
         read_rules = rJoinMutuallyExclusive(rules
-            rule rread_region_allow((rg_valid == 1'b1) && (rg_wr == 1'b0) && is_region_addr(rg_addr, regiondefs[i].offset, regiondefs[i].length) && is_word_aligned(rg_addr) && access_policy_allows(read_policy, rg_prot));
+            rule rread_region_allow(!req.wr && req_hit && req_aligned && req_rd_allowed);
                 Bit#(dw) read_data = (List::length(region_reads) > 0) ? region_reads[0].f_read(local_addr) : 0;
-                w_rdata <= read_data;
-                w_resp <= CSR_OKAY;
+                f_rsp.enq(
+                    BlueCSR_Rsp_t {
+                        rdata:  read_data,
+                        resp:   CSR_OKAY
+                    }
+                );
+                f_req.deq;
             endrule
         endrules, read_rules);
 
         write_rules = rJoinMutuallyExclusive(rules
-            rule rwrite_region_allow((rg_valid == 1'b1) && (rg_wr == 1'b1) && is_region_addr(rg_addr, regiondefs[i].offset, regiondefs[i].length) && is_word_aligned(rg_addr) && rg_wstrb == unpack(-1) && access_policy_allows(write_policy, rg_prot));
+            rule rwrite_region_allow(req.wr && req_hit && req_aligned && req_wr_valid && req_wr_allowed);
                 if (List::length(region_writes) > 0) begin
-                    region_writes[0].f_write(rg_addr - fromInteger(regiondefs[i].offset), rg_wdata);
+                    region_writes[0].f_write(local_addr, req.wdata);
                 end
-                w_resp <= CSR_OKAY;
+                f_rsp.enq(
+                    BlueCSR_Rsp_t {
+                        rdata:  ?,
+                        resp:   CSR_OKAY
+                    }
+                );
+                f_req.deq;
                 //region writes are only allowed for fully enabled strobes
             endrule
         endrules, write_rules);
@@ -828,17 +883,28 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
 
     read_rules = rJoinDescendingUrgency(read_rules,
         rules
-            rule rread_default((rg_valid == 1'b1) && (rg_wr == 1'b0));
-                w_rdata <= 0;
-                w_resp <= CSR_DECERR;
+            rule rread_default(!f_req.first.wr); //only fires if a request is available
+                f_rsp.enq(
+                    BlueCSR_Rsp_t {
+                        rdata:  0,
+                        resp:   CSR_DECERR
+                    }
+                );
+                f_req.deq;
             endrule
         endrules
     );
 
     write_rules = rJoinDescendingUrgency(write_rules,
         rules
-            rule rwrite_default((rg_valid == 1'b1) && (rg_wr == 1'b1));
-                w_resp <= CSR_DECERR;
+            rule rwrite_default(f_req.first.wr);
+                f_rsp.enq(
+                    BlueCSR_Rsp_t {
+                        rdata:  ?,
+                        resp:   CSR_DECERR
+                    }
+                );
+                f_req.deq;
             endrule
         endrules
     );
@@ -846,17 +912,9 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRAccess_ifc
     addRules(read_rules);
     addRules(write_rules);
 
-    interface BlueCSR_Fab_ifc external;
-        method valid    = rg_valid._write;
-        method wr       = rg_wr._write;
-        method addr     = rg_addr._write;
-        method wdata    = rg_wdata._write;
-        method wstrb    = rg_wstrb._write;
-        method prot     = rg_prot._write;
-
-        method ready    = 1'b1;
-        method rdata    = ((rg_valid == 1'b1) && (rg_wr == 1'b0)) ? w_rdata : 0;
-        method resp     = (rg_valid == 1'b1) ? w_resp : CSR_OKAY;
+    interface BlueCSR_ifc external;
+        interface request  = toPut(f_req);
+        interface response = toGet(f_rsp);
     endinterface
 
     interface internal = coll_device_ifc;

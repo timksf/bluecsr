@@ -1,55 +1,53 @@
 package BlueCSRTb;
 
+import GetPut :: *;
 import StmtFSM :: *;
 
 import BlueCSR :: *;
 
-function Action drive_idle(BlueCSR_Fab_ifc#(aw, dw) cfg);
+function Action issue_read(BlueCSR_ifc#(aw, dw) cfg, Bit#(aw) addr, BlueCSRProt_t prot);
     action
-        cfg.valid(0);
-        cfg.wr(0);
-        cfg.addr(0);
-        cfg.wdata(0);
-        cfg.wstrb(0);
-        cfg.prot(CSR_SECURE);
+        cfg.request.put(
+            BlueCSR_Req_t {
+                wr:     False,
+                addr:   addr,
+                wdata:  ?,
+                wstrb:  ?,
+                prot:   prot
+            }
+        );
     endaction
 endfunction
 
-function Action issue_read(BlueCSR_Fab_ifc#(aw, dw) cfg, Bit#(aw) addr, BlueCSRProt_t prot);
-    action
-        cfg.valid(1);
-        cfg.wr(0);
-        cfg.addr(addr);
-        cfg.wdata(0);
-        cfg.wstrb(0);
-        cfg.prot(prot);
-    endaction
-endfunction
-
-function ActionValue#(Tuple2#(Bit#(dw), BlueCSRResponse_t)) accept_read_response(BlueCSR_Fab_ifc#(aw, dw) cfg);
+function ActionValue#(Tuple2#(Bit#(dw), BlueCSRResponse_t)) accept_read_response(BlueCSR_ifc#(aw, dw) cfg);
     actionvalue
-        return tuple2(cfg.rdata, cfg.resp);
+        let r <- cfg.response.get;
+        return tuple2(r.rdata, r.resp);
     endactionvalue
 endfunction
 
-function Action issue_write(BlueCSR_Fab_ifc#(aw, dw) cfg, Bit#(aw) addr, Bit#(dw) data, Bit#(TDiv#(dw, 8)) strobe, BlueCSRProt_t prot);
+function Action issue_write(BlueCSR_ifc#(aw, dw) cfg, Bit#(aw) addr, Bit#(dw) data, Bit#(TDiv#(dw, 8)) strobe, BlueCSRProt_t prot);
     action
-        cfg.valid(1);
-        cfg.wr(1);
-        cfg.addr(addr);
-        cfg.wdata(data);
-        cfg.wstrb(strobe);
-        cfg.prot(prot);
+        cfg.request.put(
+            BlueCSR_Req_t {
+                wr:     True,
+                addr:   addr,
+                wdata:  data,
+                wstrb:  strobe,
+                prot:   prot
+            }
+        );
     endaction
 endfunction
 
-function ActionValue#(BlueCSRResponse_t) accept_write_response(BlueCSR_Fab_ifc#(aw, dw) cfg);
+function ActionValue#(BlueCSRResponse_t) accept_write_response(BlueCSR_ifc#(aw, dw) cfg);
     actionvalue
-        return cfg.resp;
+        let r <- cfg.response.get;
+        return r.resp;
     endactionvalue
 endfunction
 
-function Stmt expect_write_okay(BlueCSR_Fab_ifc#(aw, dw) cfg);
+function Stmt expect_write_okay(BlueCSR_ifc#(aw, dw) cfg);
     Stmt s = seq
         action
             let bus_resp <- accept_write_response(cfg);
@@ -62,7 +60,7 @@ function Stmt expect_write_okay(BlueCSR_Fab_ifc#(aw, dw) cfg);
     return s;
 endfunction
 
-function Stmt expect_read_okay(BlueCSR_Fab_ifc#(aw, dw) cfg);
+function Stmt expect_read_okay(BlueCSR_ifc#(aw, dw) cfg);
     Stmt s = seq
         action
             let bus_resp <- accept_read_response(cfg);
@@ -75,7 +73,7 @@ function Stmt expect_read_okay(BlueCSR_Fab_ifc#(aw, dw) cfg);
     return s;
 endfunction
 
-function Stmt read_csr_range(BlueCSR_Fab_ifc#(aw, dw) cfg, Reg#(Bit#(aw)) rg_addr, Reg#(Bit#(dw)) rg_data, Integer lo_addr, Integer hi_addr);
+function Stmt read_csr_range(BlueCSR_ifc#(aw, dw) cfg, Reg#(Bit#(aw)) rg_addr, Reg#(Bit#(dw)) rg_data, Integer lo_addr, Integer hi_addr);
     Stmt s = seq
         rg_addr <= fromInteger(lo_addr);
         while(rg_addr < fromInteger(hi_addr)) seq
