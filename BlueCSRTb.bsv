@@ -3,7 +3,7 @@ package BlueCSRTb;
 import GetPut :: *;
 import StmtFSM :: *;
 
-import BlueCSR :: *;
+import BlueCSRCtx :: *;
 
 function Action issue_read(BlueCSR_ifc#(aw, dw) cfg, Bit#(aw) addr, BlueCSRProt_t prot);
     action

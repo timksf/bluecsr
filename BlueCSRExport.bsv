@@ -3,7 +3,7 @@ package BlueCSRExport;
 import List :: *;
 import ModuleCollect :: *;
 
-import BlueCSR :: *;
+import BlueCSRCtx :: *;
 import BlueCSRValidation :: *;
 
 module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));

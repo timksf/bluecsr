@@ -7,9 +7,6 @@ import Connectable :: *;
 import BlueAXI :: *;
 
 import BlueCSR :: *;
-import BlueCSRTb :: *;
-import BlueCSRExport :: *;
-import BlueCSRAXI4LiteAdapter :: *;
 
 typedef enum { Mode0, Mode1, Mode2 } Mode_t deriving(Bits, Eq, FShow);
 

@@ -7,9 +7,6 @@ import Connectable :: *;
 import BlueAXI :: *;
 
 import BlueCSR :: *;
-import BlueCSRTb :: *;
-import BlueCSRExport :: *;
-import BlueCSRAXI4LiteAdapter :: *;
 
 import TestBlueCSR :: *;
 
