@@ -84,17 +84,11 @@ endmodule
 module [Module] mkTestBlueCSR(Empty);
 
     let cfg <- mk_config;
-    let axi_cfg <- mkBlueCSRAXI4LiteAdapter(cfg.external, 1, 1);
     let tb_lookup <- build_blue_csr_tb_lookup(module_config);
-
-    AXI4_Lite_Master_Rd#(32, 32) m_rd <- mkAXI4_Lite_Master_Rd(1);
-    AXI4_Lite_Master_Wr#(32, 32) m_wr <- mkAXI4_Lite_Master_Wr(1);
 
     Reg#(Bit#(32)) rg_addr <- mkReg(0);
     Reg#(Bit#(32)) rg_data <- mkReg(0);
 
-    mkConnection(m_rd.fab, axi_cfg.s_rd);
-    mkConnection(m_wr.fab, axi_cfg.s_wr);
 
     Stmt s = seq
 
