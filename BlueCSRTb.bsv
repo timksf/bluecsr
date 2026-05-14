@@ -36,8 +36,8 @@ function List#(RegRegionDef_t) find_regiondefs_by_identifier(List#(RegRegionDef_
     return List::filter(p, regiondefs);
 endfunction
 
-function List#(RegFieldDef_t) find_regfields_by_identifier(List#(RegFieldDef_t) regfields, String ident);
-    function Bool p(RegFieldDef_t regfield) = regfield.identifier == ident;
+function List#(RegFieldDef_t) find_regfields_by_reg_identifier(List#(RegFieldDef_t) regfields, Integer reg_offs, String ident);
+    function Bool p(RegFieldDef_t regfield) = regfield.offset == reg_offs && regfield.identifier == ident;
     return List::filter(p, regfields);
 endfunction
 
@@ -51,9 +51,14 @@ function Maybe#(Integer) lookup_blue_csr_region_offset(BlueCSRTbLookup_t#(aw, dw
     return List::length(regiondefs) == 0 ? tagged Invalid : tagged Valid List::head(regiondefs).offset;
 endfunction
 
-function Maybe#(RegFieldDef_t) lookup_blue_csr_field(BlueCSRTbLookup_t#(aw, dw) lookup, String ident);
-    let regfields = find_regfields_by_identifier(lookup.regfields, ident);
-    return List::length(regfields) == 0 ? tagged Invalid : tagged Valid List::head(regfields);
+function Maybe#(RegFieldDef_t) lookup_blue_csr_field(BlueCSRTbLookup_t#(aw, dw) lookup, String reg_ident, String field_ident);
+    if (lookup_blue_csr_reg_offset(lookup, reg_ident) matches tagged Valid .reg_offs) begin
+        let regfields = find_regfields_by_reg_identifier(lookup.regfields, reg_offs, field_ident);
+        return List::length(regfields) == 0 ? tagged Invalid : tagged Valid List::head(regfields);
+    end
+    else begin
+        return tagged Invalid;
+    end
 endfunction
 
 function Stmt fail_blue_csr_lookup(String kind, String ident);
