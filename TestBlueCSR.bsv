@@ -85,6 +85,7 @@ module [Module] mkTestBlueCSR(Empty);
 
     let cfg <- mk_config;
     let axi_cfg <- mkBlueCSRAXI4LiteAdapter(cfg.external, 1, 1);
+    let tb_lookup <- build_blue_csr_tb_lookup(module_config);
 
     AXI4_Lite_Master_Rd#(32, 32) m_rd <- mkAXI4_Lite_Master_Rd(1);
     AXI4_Lite_Master_Wr#(32, 32) m_wr <- mkAXI4_Lite_Master_Wr(1);
@@ -97,15 +98,15 @@ module [Module] mkTestBlueCSR(Empty);
 
     Stmt s = seq
 
-        read_csr_range(cfg.external, rg_addr, rg_data, 0, 8);
+        read_csr_reg_range(cfg.external, rg_addr, rg_data, tb_lookup, "MIV", "STS");
 
-        issue_write(cfg.external, 'h100, 'hAABBCCDD, 4'b1111, CSR_SECURE);
+        issue_write_region(cfg.external, tb_lookup, "Table0", 'hAABBCCDD, 4'b1111, CSR_SECURE);
         expect_write_okay(cfg.external);
         
-        read_csr_range(cfg.external, rg_addr, rg_data, 'h100, 'h11c);
+        read_csr_region_range(cfg.external, rg_addr, rg_data, tb_lookup, "Table0", 28);
 
         par
-            issue_read(cfg.external, 'h08, CSR_INSECURE);
+            issue_read_reg(cfg.external, tb_lookup, "STS", CSR_INSECURE);
             action
                 if(cfg.internal.sts_rstrb != 1'b1) begin
                     $display("Status register read strobe not asserted");
