@@ -10,16 +10,19 @@ import BlueCSRCtx :: *;
 typedef struct {
     List#(RegDef_t) regdefs;
     List#(RegRegionDef_t) regiondefs;
+    List#(RegFieldDef_t) regfields;
 } BlueCSRTbLookup_t#(numeric type aw, numeric type dw);
 
 module [Module] build_blue_csr_tb_lookup#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRTbLookup_t#(aw, dw));
     let {_, c} <- getCollection(ctx);
     let regdefs = List::concat(List::map(get_reg_def, c));
     let regiondefs = List::concat(List::map(get_reg_region_def, c));
+    let regfields = List::concat(List::map(get_regfield_def, c));
 
     return BlueCSRTbLookup_t {
         regdefs: regdefs,
-        regiondefs: regiondefs
+        regiondefs: regiondefs,
+        regfields: regfields
     };
 endmodule
 
@@ -33,6 +36,11 @@ function List#(RegRegionDef_t) find_regiondefs_by_identifier(List#(RegRegionDef_
     return List::filter(p, regiondefs);
 endfunction
 
+function List#(RegFieldDef_t) find_regfields_by_identifier(List#(RegFieldDef_t) regfields, String ident);
+    function Bool p(RegFieldDef_t regfield) = regfield.identifier == ident;
+    return List::filter(p, regfields);
+endfunction
+
 function Maybe#(Integer) lookup_blue_csr_reg_offset(BlueCSRTbLookup_t#(aw, dw) lookup, String ident);
     let regdefs = find_regdefs_by_identifier(lookup.regdefs, ident);
     return List::length(regdefs) == 0 ? tagged Invalid : tagged Valid List::head(regdefs).offset;
@@ -43,10 +51,25 @@ function Maybe#(Integer) lookup_blue_csr_region_offset(BlueCSRTbLookup_t#(aw, dw
     return List::length(regiondefs) == 0 ? tagged Invalid : tagged Valid List::head(regiondefs).offset;
 endfunction
 
+function Maybe#(RegFieldDef_t) lookup_blue_csr_field(BlueCSRTbLookup_t#(aw, dw) lookup, String ident);
+    let regfields = find_regfields_by_identifier(lookup.regfields, ident);
+    return List::length(regfields) == 0 ? tagged Invalid : tagged Valid List::head(regfields);
+endfunction
+
 function Stmt fail_blue_csr_lookup(String kind, String ident);
     Stmt s = seq
         action
             $display("BlueCSRTb %s lookup failed for identifier %s", kind, ident);
+            $finish();
+        endaction
+    endseq;
+    return s;
+endfunction
+
+function Stmt fail_blue_csr_expectation(String msg);
+    Stmt s = seq
+        action
+            $display("BlueCSRTb %s", msg);
             $finish();
         endaction
     endseq;

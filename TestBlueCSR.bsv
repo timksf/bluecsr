@@ -117,6 +117,7 @@ module [Module] mkTestBlueCSR(Empty);
         expect_read_okay(cfg.external);
 
         delay(5);
+        $display("Finished TB");
 
     endseq;
 
