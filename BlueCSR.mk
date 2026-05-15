@@ -1,0 +1,7 @@
+#for BSVTools
+MAKEPATH := $(dir $(lastword $(MAKEFILE_LIST)))
+MODULENAME := BlueCSR
+MODULEPATH := $(MAKEPATH)
+EXTRA_BSV_LIBS += $(MODULEPATH)
+
+$(info Adding $(MODULENAME) from $(MODULEPATH))

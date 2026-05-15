@@ -5,7 +5,20 @@ import GetPut :: *;
 import ModuleCollect :: *;
 import StmtFSM :: *;
 
+import BlueAXI :: *;
+
 import BlueCSRCtx :: *;
+
+interface BlueCSRTbAccessor_ifc#(numeric type dw);
+    method ActionValue#(Integer)                                  reg_offset(String reg_ident);
+    method ActionValue#(Integer)                                  field_bit(String reg_ident, String field_ident);
+
+    method Action                                                 read_reg_req(String reg_ident);
+    method ActionValue#(Tuple2#(Bit#(dw), BlueCSRResponse_t))     read_reg_rsp();
+    method Action                                                 write_reg_req(String reg_ident, Bit#(dw) data);
+    method Action                                                 write_reg_req_strb(String reg_ident, Bit#(dw) data, Bit#(TDiv#(dw, 8)) strb);
+    method ActionValue#(BlueCSRResponse_t)                        write_reg_rsp();
+endinterface
 
 typedef struct {
     List#(RegDef_t) regdefs;
@@ -36,7 +49,7 @@ function List#(RegRegionDef_t) find_regiondefs_by_identifier(List#(RegRegionDef_
     return List::filter(p, regiondefs);
 endfunction
 
-function List#(RegFieldDef_t) find_regfields_by_reg_identifier(List#(RegFieldDef_t) regfields, Integer reg_offs, String ident);
+function List#(RegFieldDef_t) find_regfields_by_reg_offset(List#(RegFieldDef_t) regfields, Integer reg_offs, String ident);
     function Bool p(RegFieldDef_t regfield) = regfield.offset == reg_offs && regfield.identifier == ident;
     return List::filter(p, regfields);
 endfunction
@@ -51,10 +64,14 @@ function Maybe#(Integer) lookup_blue_csr_region_offset(BlueCSRTbLookup_t#(aw, dw
     return List::length(regiondefs) == 0 ? tagged Invalid : tagged Valid List::head(regiondefs).offset;
 endfunction
 
+function Maybe#(RegFieldDef_t) lookup_blue_csr_field_at_offset(BlueCSRTbLookup_t#(aw, dw) lookup, Integer reg_offs, String field_ident);
+    let regfields = find_regfields_by_reg_offset(lookup.regfields, reg_offs, field_ident);
+    return List::length(regfields) == 0 ? tagged Invalid : tagged Valid List::head(regfields);
+endfunction
+
 function Maybe#(RegFieldDef_t) lookup_blue_csr_field(BlueCSRTbLookup_t#(aw, dw) lookup, String reg_ident, String field_ident);
     if (lookup_blue_csr_reg_offset(lookup, reg_ident) matches tagged Valid .reg_offs) begin
-        let regfields = find_regfields_by_reg_identifier(lookup.regfields, reg_offs, field_ident);
-        return List::length(regfields) == 0 ? tagged Invalid : tagged Valid List::head(regfields);
+        return lookup_blue_csr_field_at_offset(lookup, reg_offs, field_ident);
     end
     else begin
         return tagged Invalid;
@@ -64,22 +81,184 @@ endfunction
 function Stmt fail_blue_csr_lookup(String kind, String ident);
     Stmt s = seq
         action
-            $display("BlueCSRTb %s lookup failed for identifier %s", kind, ident);
+            $display("[ERROR] BlueCSRTb %s lookup failed for identifier %s", kind, ident);
             $finish();
         endaction
     endseq;
     return s;
 endfunction
 
-function Stmt fail_blue_csr_expectation(String msg);
-    Stmt s = seq
-        action
-            $display("BlueCSRTb %s", msg);
+function ActionValue#(Integer) expect_blue_csr_reg_offset(BlueCSRTbLookup_t#(aw, dw) lookup, String ident);
+    actionvalue
+        Integer rg_offs = ?;
+        if (lookup_blue_csr_reg_offset(lookup, ident) matches tagged Valid .offs) begin
+            rg_offs = offs;
+        end
+        else begin
+            $display("[ERROR] BlueCSRTb register lookup failed for identifier %s", ident);
             $finish();
-        endaction
-    endseq;
-    return s;
+        end
+        return rg_offs;
+    endactionvalue
 endfunction
+
+function ActionValue#(Integer) expect_blue_csr_field_bit(BlueCSRTbLookup_t#(aw, dw) lookup, String reg_ident, String field_ident);
+    actionvalue
+        let reg_offs <- expect_blue_csr_reg_offset(lookup, reg_ident);
+        Integer rg_bitpos = ?;
+        if (lookup_blue_csr_field_at_offset(lookup, reg_offs, field_ident) matches tagged Valid .field) begin
+            rg_bitpos = field.bit_offset;
+        end
+        else begin
+            $display("[ERROR] BlueCSRTb field lookup failed for identifier %s.%s", reg_ident, field_ident);
+            $finish();
+        end
+        return rg_bitpos;
+    endactionvalue
+endfunction
+
+function BlueCSRResponse_t axi4_lite_to_bluecsr_resp(AXI4_Lite_Response resp);
+    return case (resp)
+        OKAY:   CSR_OKAY;
+        EXOKAY: CSR_EXOKAY;
+        SLVERR: CSR_SLVERR;
+        DECERR: CSR_DECERR;
+    endcase;
+endfunction
+
+module [Module] mkBlueCSRTbAccessorAXI4Lite#(
+    BlueCSRTbLookup_t#(aw, dw) lookup,
+    AXI4_Lite_Master_Rd#(aw, dw) rd,
+    AXI4_Lite_Master_Wr#(aw, dw) wr
+)(BlueCSRTbAccessor_ifc#(dw));
+    method ActionValue#(Integer) reg_offset(String reg_ident);
+        let offs <- expect_blue_csr_reg_offset(lookup, reg_ident);
+        return offs;
+    endmethod
+
+    method ActionValue#(Integer) field_bit(String reg_ident, String field_ident);
+        let bitpos <- expect_blue_csr_field_bit(lookup, reg_ident, field_ident);
+        return bitpos;
+    endmethod
+
+    method Action read_reg_req(String reg_ident);
+        action
+            let offs <- expect_blue_csr_reg_offset(lookup, reg_ident);
+            rd.request.put(AXI4_Lite_Read_Rq_Pkg {
+                addr: fromInteger(offs),
+                prot: UNPRIV_SECURE_DATA
+            });
+        endaction
+    endmethod
+
+    method ActionValue#(Tuple2#(Bit#(dw), BlueCSRResponse_t)) read_reg_rsp();
+        actionvalue
+            let rsp <- rd.response.get();
+            return tuple2(rsp.data, axi4_lite_to_bluecsr_resp(rsp.resp));
+        endactionvalue
+    endmethod
+
+    method Action write_reg_req(String reg_ident, Bit#(dw) data);
+        action
+            let offs <- expect_blue_csr_reg_offset(lookup, reg_ident);
+            wr.request.put(AXI4_Lite_Write_Rq_Pkg {
+                addr: fromInteger(offs),
+                prot: UNPRIV_SECURE_DATA,
+                data: data,
+                strb: unpack(-1)
+            });
+        endaction
+    endmethod
+
+    method Action write_reg_req_strb(String reg_ident, Bit#(dw) data, Bit#(TDiv#(dw, 8)) strb);
+        action
+            let offs <- expect_blue_csr_reg_offset(lookup, reg_ident);
+            wr.request.put(AXI4_Lite_Write_Rq_Pkg {
+                addr: fromInteger(offs),
+                prot: UNPRIV_SECURE_DATA,
+                data: data,
+                strb: strb
+            });
+        endaction
+    endmethod
+
+    method ActionValue#(BlueCSRResponse_t) write_reg_rsp();
+        actionvalue
+            let rsp <- wr.response.get();
+            return axi4_lite_to_bluecsr_resp(rsp.resp);
+        endactionvalue
+    endmethod
+endmodule
+
+module [Module] mkBlueCSRTbAccessorBlueCSR#(
+    BlueCSRTbLookup_t#(aw, dw) lookup,
+    BlueCSR_ifc#(aw, dw) csr
+)(BlueCSRTbAccessor_ifc#(dw));
+    method ActionValue#(Integer) reg_offset(String reg_ident);
+        let offs <- expect_blue_csr_reg_offset(lookup, reg_ident);
+        return offs;
+    endmethod
+
+    method ActionValue#(Integer) field_bit(String reg_ident, String field_ident);
+        let bitpos <- expect_blue_csr_field_bit(lookup, reg_ident, field_ident);
+        return bitpos;
+    endmethod
+
+    method Action read_reg_req(String reg_ident);
+        action
+            let offs <- expect_blue_csr_reg_offset(lookup, reg_ident);
+            csr.request.put(
+                BlueCSR_Req_t {
+                    wr:     False,
+                    addr:   fromInteger(offs),
+                    wdata:  ?,
+                    wstrb:  ?,
+                    prot:   CSR_INSECURE
+                }
+            );
+        endaction
+    endmethod
+
+    method ActionValue#(Tuple2#(Bit#(dw), BlueCSRResponse_t)) read_reg_rsp();
+        let rsp <- accept_read_response(csr);
+        return rsp;
+    endmethod
+
+    method Action write_reg_req(String reg_ident, Bit#(dw) data);
+        action
+            let offs <- expect_blue_csr_reg_offset(lookup, reg_ident);
+            csr.request.put(
+                BlueCSR_Req_t {
+                    wr:     True,
+                    addr:   fromInteger(offs),
+                    wdata:  data,
+                    wstrb:  unpack(-1),
+                    prot:   CSR_INSECURE
+                }
+            );
+        endaction
+    endmethod
+
+    method Action write_reg_req_strb(String reg_ident, Bit#(dw) data, Bit#(TDiv#(dw, 8)) strb);
+        action
+            let offs <- expect_blue_csr_reg_offset(lookup, reg_ident);
+            csr.request.put(
+                BlueCSR_Req_t {
+                    wr:     True,
+                    addr:   fromInteger(offs),
+                    wdata:  data,
+                    wstrb:  strb,
+                    prot:   CSR_INSECURE
+                }
+            );
+        endaction
+    endmethod
+
+    method ActionValue#(BlueCSRResponse_t) write_reg_rsp();
+        let rsp <- accept_write_response(csr);
+        return rsp;
+    endmethod
+endmodule
 
 function Action issue_read(BlueCSR_ifc#(aw, dw) cfg, Bit#(aw) addr, BlueCSRProt_t prot);
     action
