@@ -48,6 +48,12 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
         if(region.length <= 0) begin
             errors = append_newline(errors, "BlueCSR validation failed: region " + region.identifier + " has non-positive length.");
         end
+        else if(!is_power_of_two(region.length)) begin
+            errors = append_newline(errors, "BlueCSR validation failed: region " + region.identifier + " length must be a power of two for mask-based address decoding.");
+        end
+        else if((region.offset % region.length) != 0) begin
+            errors = append_newline(errors, "BlueCSR validation failed: region " + region.identifier + " offset must be aligned to its length for mask-based address decoding.");
+        end
         if((region.offset % word_bytes) != 0) begin
             errors = append_newline(errors, "BlueCSR validation failed: region " + region.identifier + " offset is not aligned to the CSR word size.");
         end

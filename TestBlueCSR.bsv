@@ -20,6 +20,7 @@ interface ModConfig_ifc;
 
     method Action running(Bool b);
     method Action rxerr(Bool b);
+    method Action sts_event(Bool b);
 endinterface
 
 module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
@@ -35,6 +36,7 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
     Reg#(Bool)      rg_sts_run;
 
     Reg#(Bit#(1))   rg_sts_rstrb;
+    Wire#(Bool)     w_sts_evt <- mkDWire(False);
 
     RegFile#(Bit#(8), Bit#(8)) table0 <- mkRegFileFull;
 
@@ -54,6 +56,7 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
     csr_reg_def('h08, "STS", "Module status register");
     rg_sts_run      <- csr_reg_ro ('h08, False, 0, "RUNN",  "Status Running",          "Indicates IP active status.");
     rg_sts_rxerr    <- csr_reg_w1c('h08, False, 4, "RXERR", "Status Receive Error",    "Indicates Reception Error.");
+    csr_reg_w1c_evt('h08, False, w_sts_evt, 8, "EVENT", "Event Status", "Indicates a sticky hardware event.");
 
     rg_sts_rstrb    <- csr_reg_trigr('h08, False,  "STSRD", "Status Read Access Strobe", "Indicates a bus read access to this register.");
 
@@ -67,6 +70,7 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
 
     method running  = rg_sts_run._write;
     method rxerr    = rg_sts_rxerr._write;
+    method sts_event = w_sts_evt._write;
 
 endmodule
 
@@ -89,6 +93,20 @@ module [Module] mkTestBlueCSR(Empty);
     Reg#(Bit#(32)) rg_addr <- mkReg(0);
     Reg#(Bit#(32)) rg_data <- mkReg(0);
 
+    function Action expect_event(Bool expected);
+        action
+            let rsp <- accept_read_response(cfg.external);
+            if(tpl_2(rsp) != CSR_OKAY || unpack(tpl_1(rsp)[8]) != expected) begin
+                $display(
+                    "W1C event mismatch: expected %0d, got %0d (%0d)",
+                    expected,
+                    tpl_1(rsp)[8],
+                    tpl_2(rsp)
+                );
+                $finish(1);
+            end
+        endaction
+    endfunction
 
     Stmt s = seq
 
@@ -109,6 +127,30 @@ module [Module] mkTestBlueCSR(Empty);
             endaction
         endpar
         expect_read_okay(cfg.external);
+
+        cfg.internal.sts_event(True);
+        delay(1);
+
+        issue_read(cfg.external, 'h08, CSR_INSECURE);
+        expect_event(True);
+
+        issue_write(cfg.external, 'h08, 'h100, 4'b0000, CSR_INSECURE);
+        expect_write_okay(cfg.external);
+        issue_read(cfg.external, 'h08, CSR_INSECURE);
+        expect_event(True);
+
+        issue_write(cfg.external, 'h08, 'h100, 4'b0010, CSR_INSECURE);
+        expect_write_okay(cfg.external);
+        issue_read(cfg.external, 'h08, CSR_INSECURE);
+        expect_event(False);
+
+        par
+            issue_write(cfg.external, 'h08, 'h100, 4'b0010, CSR_INSECURE);
+            cfg.internal.sts_event(True);
+        endpar
+        expect_write_okay(cfg.external);
+        issue_read(cfg.external, 'h08, CSR_INSECURE);
+        expect_event(True);
 
         delay(5);
         $display("Finished TB");

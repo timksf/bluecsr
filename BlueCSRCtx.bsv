@@ -349,6 +349,16 @@ function Bool byte_ranges_overlap(Integer a_offs, Integer a_len, Integer b_offs,
     return (a_offs < (b_offs + b_len)) && (b_offs < (a_offs + a_len));
 endfunction
 
+function Bool is_power_of_two(Integer value);
+    Bool result = value > 0;
+    Integer remaining = value;
+    while (remaining > 1) begin
+        result = result && ((remaining % 2) == 0);
+        remaining = remaining / 2;
+    end
+    return result;
+endfunction
+
 function Integer count_regions_exact(List#(RegRegionDef_t) regions, Integer offs, Integer len);
     Integer count = 0;
     for (Integer i = 0; i < length(regions); i = i + 1) begin
@@ -394,6 +404,16 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_def#(Integer offs, String ident, String d
 endmodule
 
 module [BlueCSRCtx_t#(aw, dw)] csr_region_def#(Integer offs, Integer len, String ident, String desc)();
+    if(len <= 0) begin
+        errorM("BlueCSR region " + ident + " has non-positive length.");
+    end
+    else if(!is_power_of_two(len)) begin
+        errorM("BlueCSR region " + ident + " length must be a power of two for mask-based address decoding.");
+    end
+    else if((offs % len) != 0) begin
+        errorM("BlueCSR region " + ident + " offset must be aligned to its length for mask-based address decoding.");
+    end
+
     RegMapEntry_t#(aw, dw) entry = tagged RegRegionDef RegRegionDef_t {
         offset: offs,
         length: len,
@@ -610,6 +630,52 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c#(Integer offs, t rv, Integer bitpos, 
     return r;
 endmodule
 
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c_evt#(Integer offs, Bool rv, Bool evt, Integer bitpos, String ident, String fname, String desc)()
+    provisos(
+        Add#(1, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    Reg#(Bool) r <- mkReg(rv);
+    Wire#(Bool) w_clear <- mkDWire(False);
+
+    String reset_value = "0x" + integerToHex(bit_to_integer(pack(rv)));
+
+    rule update;
+        r <= (r && !w_clear) || evt;
+    endrule
+
+    function Bit#(dw) do_read() = field_read_pure(r, bitpos);
+
+    function Action do_write(Bit#(dw) d, Bit#(TDiv#(dw, 8)) s);
+        action
+            w_clear <= unpack(d[bitpos] & s[bitpos / 8]);
+        endaction
+    endfunction
+
+    RegMapEntry_t#(aw, dw) read_entry = tagged ReadOpPure ReadOpPure_t {
+        offs: offs,
+        f_read: do_read
+    };
+    RegMapEntry_t#(aw, dw) write_entry = tagged WriteOp WriteOp_t {
+        offs: offs,
+        f_write: do_write
+    };
+    RegMapEntry_t#(aw, dw) field_entry = tagged RegFieldDef RegFieldDef_t {
+        offset: offs,
+        identifier: ident,
+        name: fname,
+        description: desc,
+        bit_offset: bitpos,
+        width: 1,
+        reset_value: reset_value
+    };
+
+    addToCollection(write_entry);
+    addToCollection(read_entry);
+    addToCollection(field_entry);
+endmodule
+
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1s#(Integer offs, t rv, Integer bitpos, String ident, String fname, String desc)(Reg#(t))
     provisos(
         Bits#(t, sz_t),
@@ -803,7 +869,9 @@ module [Module] create_blue_csr#(
     endfunction
 
     function Bool is_region_addr(Bit#(aw) addr, Integer offs, Integer len);
-        return (addr >= fromInteger(offs)) && (addr < fromInteger(offs + len));
+        Bit#(aw) region_mask = ~fromInteger(len - 1);
+        Bit#(aw) region_base = fromInteger(offs);
+        return (addr & region_mask) == region_base;
     endfunction
 
     Rules read_rules = emptyRules;

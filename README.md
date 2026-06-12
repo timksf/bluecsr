@@ -20,6 +20,7 @@ Field definitions:
 - `csr_reg_ws` creates a write-set field.
 - `csr_reg_wc` creates a write-clear field.
 - `csr_reg_w1c` creates a write-1-to-clear field.
+- `csr_reg_w1c_evt` creates a single-bit write-1-to-clear field with a Boolean hardware event input that takes priority over software clearing.
 - `csr_reg_w1s` creates a write-1-to-set field.
 
 Region accessors:
