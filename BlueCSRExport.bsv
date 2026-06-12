@@ -126,7 +126,9 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
     let regiondefs          = List::concat(List::map(get_reg_region_def, c));
     let regfields           = List::concat(List::map(get_regfield_def, c));
     let pure_reads          = List::concat(List::map(get_pure_read, c));
+    let action_reads        = List::concat(List::map(get_action_read, c));
     let writes              = List::concat(List::map(get_write_op, c));
+    let action_writes       = List::concat(List::map(get_action_write, c));
     let read_regions   = List::concat(List::map(get_read_region, c));
     let write_regions       = List::concat(List::map(get_write_region, c));
 
@@ -146,6 +148,9 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
         for(Integer i = 0; i < length(pure_reads); i = i + 1) begin
             found = found || pure_reads[i].offs == offs;
         end
+        for(Integer i = 0; i < length(action_reads); i = i + 1) begin
+            found = found || action_reads[i].offs == offs;
+        end
         return found;
     endfunction
 
@@ -153,6 +158,9 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
         Bool found = False;
         for(Integer i = 0; i < length(writes); i = i + 1) begin
             found = found || writes[i].offs == offs;
+        end
+        for(Integer i = 0; i < length(action_writes); i = i + 1) begin
+            found = found || action_writes[i].offs == offs;
         end
         return found;
     endfunction

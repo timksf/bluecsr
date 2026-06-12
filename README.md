@@ -22,6 +22,9 @@ Field definitions:
 - `csr_reg_w1c` creates a write-1-to-clear field.
 - `csr_reg_w1c_evt` creates a single-bit write-1-to-clear field with a Boolean hardware event input that takes priority over software clearing.
 - `csr_reg_w1s` creates a write-1-to-set field.
+- `csr_reg_fifo_ro` creates an exclusive, LSB-aligned FIFO read that returns `CSR_SLVERR` when empty. FIFO widths must be byte multiples no wider than the CSR data width.
+- `csr_reg_fifo_ro_valid` creates a non-failing FIFO read with byte-multiple data at the least-significant bits and a valid bit immediately above it. The FIFO element width plus one must fit in the CSR data width.
+- `csr_reg_fifo_wo` creates an exclusive, LSB-aligned FIFO write that accepts exactly the byte strobes occupied by the FIFO field and returns `CSR_SLVERR` when full. FIFO widths must be byte multiples no wider than the CSR data width.
 
 Region accessors:
 - `csr_region_ro` creates a read-only region backed by a read function.

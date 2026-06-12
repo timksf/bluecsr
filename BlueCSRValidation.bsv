@@ -12,7 +12,9 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
     let access_policies     = List::concat(List::map(get_access_policy_def, c));
     let regfields           = List::concat(List::map(get_regfield_def, c));
     let pure_reads          = List::concat(List::map(get_pure_read, c));
+    let action_reads        = List::concat(List::map(get_action_read, c));
     let writes              = List::concat(List::map(get_write_op, c));
+    let action_writes       = List::concat(List::map(get_action_write, c));
     let read_regions        = List::concat(List::map(get_read_region, c));
     let write_regions       = List::concat(List::map(get_write_region, c));
 
@@ -108,9 +110,62 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
         end
     end
 
+    for(Integer i = 0; i < length(action_reads); i = i + 1) begin
+        if(count_regdefs_at(regdefs, action_reads[i].offs) != 1) begin
+            errors = append_newline(errors, "BlueCSR validation failed: action read at offset 0x" + integerToString(action_reads[i].offs) + " does not resolve to exactly one csr_reg_def.");
+        end
+    end
+
     for(Integer i = 0; i < length(writes); i = i + 1) begin
         if(count_regdefs_at(regdefs, writes[i].offs) != 1) begin
             errors = append_newline(errors, "BlueCSR validation failed: write op at offset 0x" + integerToString(writes[i].offs) + " does not resolve to exactly one csr_reg_def.");
+        end
+    end
+
+    for(Integer i = 0; i < length(action_writes); i = i + 1) begin
+        if(count_regdefs_at(regdefs, action_writes[i].offs) != 1) begin
+            errors = append_newline(errors, "BlueCSR validation failed: action write at offset 0x" + integerToString(action_writes[i].offs) + " does not resolve to exactly one csr_reg_def.");
+        end
+    end
+
+    for(Integer ri = 0; ri < length(regdefs); ri = ri + 1) begin
+        Integer value_read_count = 0;
+        Integer action_read_count = 0;
+        Integer value_write_count = 0;
+        Integer action_write_count = 0;
+        Bool exclusive_read = False;
+        Bool exclusive_write = False;
+
+        for(Integer i = 0; i < length(pure_reads); i = i + 1) begin
+            if(pure_reads[i].offs == regdefs[ri].offset) value_read_count = value_read_count + 1;
+        end
+        for(Integer i = 0; i < length(action_reads); i = i + 1) begin
+            if(action_reads[i].offs == regdefs[ri].offset) begin
+                action_read_count = action_read_count + 1;
+                exclusive_read = exclusive_read || action_reads[i].exclusive;
+            end
+        end
+        for(Integer i = 0; i < length(writes); i = i + 1) begin
+            if(writes[i].offs == regdefs[ri].offset) value_write_count = value_write_count + 1;
+        end
+        for(Integer i = 0; i < length(action_writes); i = i + 1) begin
+            if(action_writes[i].offs == regdefs[ri].offset) begin
+                action_write_count = action_write_count + 1;
+                exclusive_write = exclusive_write || action_writes[i].exclusive;
+            end
+        end
+
+        if(action_read_count > 1) begin
+            errors = append_newline(errors, "BlueCSR validation failed: register " + regdefs[ri].identifier + " has multiple action reads.");
+        end
+        if(exclusive_read && value_read_count > 0) begin
+            errors = append_newline(errors, "BlueCSR validation failed: register " + regdefs[ri].identifier + " mixes an exclusive action read with value reads.");
+        end
+        if(action_write_count > 1) begin
+            errors = append_newline(errors, "BlueCSR validation failed: register " + regdefs[ri].identifier + " has multiple action writes.");
+        end
+        if(exclusive_write && value_write_count > 0) begin
+            errors = append_newline(errors, "BlueCSR validation failed: register " + regdefs[ri].identifier + " mixes an exclusive action write with other writes.");
         end
     end
 
