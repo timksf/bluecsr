@@ -40,6 +40,7 @@ Trigger fields:
 Runtime and export:
 - `create_blue_csr` builds the live BlueCSR interface from a `BlueCSRCtx_t` definition.
 - `doc_blue_csr` renders a human-readable register map summary.
+- `doc_blue_csr_markdown` renders the register map as a Markdown table.
 - `export_systemrdl_blue_csr` writes the register map out as SystemRDL.
 
 Interfaces and types:

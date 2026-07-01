@@ -160,6 +160,139 @@ module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
 
 endmodule
 
+module [Module] doc_blue_csr_markdown#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
+
+    let {coll_device_ifc, c} <- getCollection(ctx);
+    let validation = validate_blue_csr_entries(c);
+    let regdefs     = List::concat(List::map(get_reg_def, c));
+    let regiondefs  = List::concat(List::map(get_reg_region_def, c));
+    let regfields   = List::concat(List::map(get_regfield_def, c));
+
+    if (!validation.valid) begin
+        errorM(validation.errors);
+    end
+
+    function String repeatString(String value, Integer count);
+        if (count <= 0) return "";
+        else return value + repeatString(value, count - 1);
+    endfunction
+
+    function String padLeftWith(String value, Integer width, String fill);
+        Integer padding = width - stringLength(value);
+        return repeatString(fill, padding) + value;
+    endfunction
+
+    function String padInteger(Integer value, Integer width);
+        return padLeftWith(integerToString(value), width, "0");
+    endfunction
+
+    function String fieldBits(RegFieldDef_t rf);
+        Integer msb = rf.bit_offset + rf.width - 1;
+        return "[" + padInteger(msb, 2) + ":" + padInteger(rf.bit_offset, 2) + "]";
+    endfunction
+
+    function String fieldAccess(RegFieldDef_t rf);
+        case (rf.access_type)
+            CSR_RW:  return "RW";
+            CSR_RO:  return "RO";
+            CSR_RC:  return "RC";
+            CSR_WC:  return "WC";
+            CSR_WS:  return "WS";
+            CSR_WO:  return "WO";
+            CSR_W1S: return "W1S";
+            CSR_W1C: return "W1C";
+        endcase
+    endfunction
+
+    function Integer regOffsetWidth(RegDef_t regdef);
+        return stringLength(integerToHex(regdef.offset));
+    endfunction
+
+    function Integer regionAddressWidth(RegRegionDef_t regiondef);
+        Integer end_offset = regiondef.offset + regiondef.length - 1;
+        return max(stringLength(integerToHex(regiondef.offset)), stringLength(integerToHex(end_offset)));
+    endfunction
+
+    function Integer addressWidth();
+        Integer reg_width = List::foldr(max, 1, List::map(regOffsetWidth, regdefs));
+        Integer region_width = List::foldr(max, 1, List::map(regionAddressWidth, regiondefs));
+        return max(reg_width, region_width);
+    endfunction
+
+    function String formatAddress(Integer value);
+        return "0x" + padLeftWith(integerToHex(value), addressWidth(), "0");
+    endfunction
+
+    function String markdownHeader();
+        return "| Address | Register | Register Description | Field | Bits | Access | Reset | Field Description |\n"
+            + "| --- | --- | --- | --- | --- | --- | --- | --- |\n";
+    endfunction
+
+    function String fieldRow(RegDef_t regdef, RegFieldDef_t rf, Bool include_reg);
+        return "| "
+            + (include_reg ? formatAddress(regdef.offset) : "")
+            + " | "
+            + (include_reg ? regdef.identifier : "")
+            + " | "
+            + (include_reg ? regdef.description : "")
+            + " | "
+            + rf.identifier
+            + " | "
+            + fieldBits(rf)
+            + " | "
+            + fieldAccess(rf)
+            + " | "
+            + rf.reset_value
+            + " | "
+            + rf.description
+            + " |\n";
+    endfunction
+
+    function String emptyRegRow(RegDef_t regdef);
+        return "| "
+            + formatAddress(regdef.offset)
+            + " | "
+            + regdef.identifier
+            + " | "
+            + regdef.description
+            + " |  |  |  |  |  |\n";
+    endfunction
+
+    function String doc_reg(RegDef_t regdef);
+        String rows = "";
+        Bool found_field = False;
+        for(Integer fi = 0; fi < length(regfields); fi = fi + 1) begin
+            let rf = regfields[fi];
+            if (rf.offset == regdef.offset) begin
+                rows = rows + fieldRow(regdef, rf, !found_field);
+                found_field = True;
+            end
+        end
+        return found_field ? rows : emptyRegRow(regdef);
+    endfunction
+
+    function String doc_region(RegRegionDef_t regiondef);
+        return "| "
+            + formatAddress(regiondef.offset)
+            + ":"
+            + formatAddress(regiondef.offset + regiondef.length - 1)
+            + " | "
+            + regiondef.identifier
+            + " | "
+            + regiondef.description
+            + " |  |  |  |  |  |\n";
+    endfunction
+
+    String reg_doc = List::foldl(strConcat, "", List::map(doc_reg, regdefs));
+    String region_doc = List::foldl(strConcat, "", List::map(doc_region, regiondefs));
+    String map_doc = validation.map_name + " " + validation.map_description;
+
+    return RegMapDoc_t {
+        reg_defs: validation.valid ? map_doc + "\n\n" + markdownHeader() + reg_doc + region_doc : validation.errors
+    };
+
+endmodule
+
 module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String output_path)(BlueCSRExport_ifc);
 
     let {coll_device_ifc, c} <- getCollection(ctx);
