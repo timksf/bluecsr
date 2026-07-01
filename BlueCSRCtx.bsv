@@ -110,6 +110,7 @@ typedef struct {
     String identifier;
     String name;
     String description;
+    BlueCSRAccess_t access_type;
     Integer bit_offset;
     Integer width;
     String reset_value;
@@ -558,6 +559,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_field#(BlueCSRAccess_t access_type, Integ
         identifier: ident,
         name: name,
         description: desc,
+        access_type: access_type,
         bit_offset: bitpos,
         width: valueOf(sz_t),
         reset_value: reset_value
@@ -688,6 +690,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c_evt#(Integer offs, Bool rv, Bool evt,
         identifier: ident,
         name: fname,
         description: desc,
+        access_type: CSR_W1C,
         bit_offset: bitpos,
         width: 1,
         reset_value: reset_value
@@ -739,6 +742,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_fifo_ro#(Integer offs, FIFOF#(t) fifo, St
         identifier: ident,
         name: name,
         description: desc,
+        access_type: CSR_RO,
         bit_offset: 0,
         width: valueOf(sz_t),
         reset_value: "0x0"
@@ -780,6 +784,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_fifo_ro_valid#(Integer offs, FIFOF#(t) fi
         identifier: data_ident,
         name: data_name,
         description: data_desc,
+        access_type: CSR_RO,
         bit_offset: 0,
         width: valueOf(sz_t),
         reset_value: "0x0"
@@ -789,6 +794,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_fifo_ro_valid#(Integer offs, FIFOF#(t) fi
         identifier: valid_ident,
         name: valid_name,
         description: valid_desc,
+        access_type: CSR_RO,
         bit_offset: valueOf(sz_t),
         width: 1,
         reset_value: "0x0"
@@ -837,6 +843,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_fifo_wo#(Integer offs, FIFOF#(t) fifo, St
         identifier: ident,
         name: name,
         description: desc,
+        access_type: CSR_WO,
         bit_offset: 0,
         width: valueOf(sz_t),
         reset_value: "0x0"

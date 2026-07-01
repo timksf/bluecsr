@@ -54,8 +54,36 @@ module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
         return "reset=" + rf.reset_value;
     endfunction
 
+    function String fieldAccess(RegFieldDef_t rf);
+        case (rf.access_type)
+            CSR_RW:  return "RW";
+            CSR_RO:  return "RO";
+            CSR_RC:  return "RC";
+            CSR_WC:  return "WC";
+            CSR_WS:  return "WS";
+            CSR_WO:  return "WO";
+            CSR_W1S: return "W1S";
+            CSR_W1C: return "W1C";
+        endcase
+    endfunction
+
     function Integer regOffsetWidth(RegDef_t regdef);
         return stringLength(integerToHex(regdef.offset));
+    endfunction
+
+    function Integer regionAddressWidth(RegRegionDef_t regiondef);
+        Integer end_offset = regiondef.offset + regiondef.length - 1;
+        return max(stringLength(integerToHex(regiondef.offset)), stringLength(integerToHex(end_offset)));
+    endfunction
+
+    function Integer addressWidth();
+        Integer reg_width = List::foldr(max, 1, List::map(regOffsetWidth, regdefs));
+        Integer region_width = List::foldr(max, 1, List::map(regionAddressWidth, regiondefs));
+        return max(reg_width, region_width);
+    endfunction
+
+    function String formatAddress(Integer value);
+        return "0x" + padLeftWith(integerToHex(value), addressWidth(), "0");
     endfunction
 
     function Integer regIdentifierWidth(RegDef_t regdef);
@@ -74,29 +102,36 @@ module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
         return stringLength(fieldReset(rf));
     endfunction
 
+    function Integer fieldAccessWidth(RegFieldDef_t rf);
+        return stringLength(fieldAccess(rf));
+    endfunction
+
     function String doc_reg(RegDef_t regdef);
-        Integer reg_offset_width        = List::foldr(max, 0, List::map(regOffsetWidth, regdefs));
         Integer reg_identifier_width    = List::foldr(max, 0, List::map(regIdentifierWidth, regdefs));
         Integer field_identifier_width  = List::foldr(max, 0, List::map(fieldIdentifierWidth, regfields));
         Integer field_bits_width        = List::foldr(max, 0, List::map(fieldBitsWidth, regfields));
+        Integer field_access_width      = List::foldr(max, 0, List::map(fieldAccessWidth, regfields));
         Integer field_reset_width       = List::foldr(max, 0, List::map(fieldResetWidth, regfields));
         String field_doc = "";
         for(Integer fi = 0; fi < length(regfields); fi = fi + 1) begin
             let rf = regfields[fi];
             if (rf.offset == regdef.offset) begin
                 String bits = fieldBits(rf);
+                String access = fieldAccess(rf);
                 String reset = fieldReset(rf);
                 field_doc = field_doc + "\n  "
                     + padRight(rf.identifier, field_identifier_width)
                     + "  "
                     + padRight(bits, field_bits_width)
                     + "  "
+                    + padRight(access, field_access_width)
+                    + "  "
                     + padRight(reset, field_reset_width)
                     + "  "
                     + rf.description;
             end
         end
-        return padLeft(integerToHex(regdef.offset), reg_offset_width)
+        return formatAddress(regdef.offset)
             + "  "
             + padRight(regdef.identifier, reg_identifier_width)
             + "  "
@@ -105,11 +140,18 @@ module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
     endfunction
 
     function String doc_region(RegRegionDef_t regiondef);
-        return "REGION " + integerToHex(regiondef.offset) + ":" + integerToHex(regiondef.offset + regiondef.length - 1) + " " + regiondef.identifier + " " + regiondef.description;
+        return "REGION "
+            + formatAddress(regiondef.offset)
+            + ":"
+            + formatAddress(regiondef.offset + regiondef.length - 1)
+            + " "
+            + regiondef.identifier
+            + " "
+            + regiondef.description;
     endfunction
 
-    String reg_doc = List::foldl(strConcat, "", List::map(strConcat("\n"), List::map(doc_reg, regdefs)));
-    String region_doc = List::foldl(strConcat, "", List::map(strConcat("\n"), List::map(doc_region, regiondefs)));
+    String reg_doc = List::foldl(strConcat, "", List::map(strConcat("\n\n"), List::map(doc_reg, regdefs)));
+    String region_doc = List::foldl(strConcat, "", List::map(strConcat("\n\n"), List::map(doc_region, regiondefs)));
     String map_doc = validation.map_name + " " + validation.map_description;
 
     return RegMapDoc_t {
@@ -188,6 +230,19 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
         else return "r";
     endfunction
 
+    function String get_field_sw(BlueCSRAccess_t access_type);
+        case (access_type)
+            CSR_RW:  return "rw";
+            CSR_RO:  return "r";
+            CSR_RC:  return "r";
+            CSR_WC:  return "rw";
+            CSR_WS:  return "rw";
+            CSR_WO:  return "w";
+            CSR_W1S: return "rw";
+            CSR_W1C: return "rw";
+        endcase
+    endfunction
+
     rule r_export_once (!rg_started);
         rg_started <= True;
 
@@ -235,7 +290,7 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
                         let rf = regfields[fi];
                         if (rf.offset == rd.offset) begin
                             Integer msb = rf.bit_offset + rf.width - 1;
-                            $fwrite(fh, "    field { sw = %s; desc = \"%s\"; } %s[%0d:%0d] = %s;\n", sw, rf.description, rf.identifier, msb, rf.bit_offset, rf.reset_value);
+                            $fwrite(fh, "    field { sw = %s; desc = \"%s\"; } %s[%0d:%0d] = %s;\n", get_field_sw(rf.access_type), rf.description, rf.identifier, msb, rf.bit_offset, rf.reset_value);
                             wrote_field = True;
                         end
                     end
