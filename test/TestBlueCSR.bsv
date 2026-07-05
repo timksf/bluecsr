@@ -3,6 +3,7 @@ package TestBlueCSR;
 import StmtFSM :: *;
 import RegFile :: *;
 import Connectable :: *;
+import FIFOF :: *;
 
 import BlueAXI :: *;
 
@@ -20,6 +21,12 @@ interface ModConfig_ifc;
 
     method Action running(Bool b);
     method Action rxerr(Bool b);
+    method Action sts_event(Bool b);
+    method Action fifo_error_enq(Bit#(8) value);
+    method Action fifo_valid_enq(Bit#(8) value);
+    method Bool fifo_write_not_empty;
+    method Bit#(8) fifo_write_first;
+    method Action fifo_write_deq;
 endinterface
 
 module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
@@ -35,8 +42,12 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
     Reg#(Bool)      rg_sts_run;
 
     Reg#(Bit#(1))   rg_sts_rstrb;
+    Wire#(Bool)     w_sts_evt <- mkDWire(False);
 
     RegFile#(Bit#(8), Bit#(8)) table0 <- mkRegFileFull;
+    FIFOF#(Bit#(8)) fifo_error_read <- mkSizedFIFOF(1);
+    FIFOF#(Bit#(8)) fifo_valid_read <- mkSizedFIFOF(1);
+    FIFOF#(Bit#(8)) fifo_write <- mkSizedFIFOF(1);
 
     csr_regmap_def("testBlueCSR", "Test BlueCSR register map");
 
@@ -54,8 +65,28 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
     csr_reg_def('h08, "STS", "Module status register");
     rg_sts_run      <- csr_reg_ro ('h08, False, 0, "RUNN",  "Status Running",          "Indicates IP active status.");
     rg_sts_rxerr    <- csr_reg_w1c('h08, False, 4, "RXERR", "Status Receive Error",    "Indicates Reception Error.");
+    csr_reg_w1c_evt('h08, False, w_sts_evt, 8, "EVENT", "Event Status", "Indicates a sticky hardware event.");
 
     rg_sts_rstrb    <- csr_reg_trigr('h08, False,  "STSRD", "Status Read Access Strobe", "Indicates a bus read access to this register.");
+
+    csr_reg_def('h0C, "FIFO_RD", "Exclusive FIFO read register");
+    csr_reg_fifo_ro('h0C, fifo_error_read, "DATA", "FIFO Data", "Returns SLVERR when the FIFO is empty.");
+
+    csr_reg_def('h10, "FIFO_RD_VALID", "Non-failing FIFO read register");
+    csr_reg_fifo_ro_valid(
+        'h10,
+        fifo_valid_read,
+        "DATA",
+        "FIFO Data",
+        "FIFO data when VALID is set.",
+        "VALID",
+        "FIFO Data Valid",
+        "Indicates that DATA was dequeued from the FIFO."
+    );
+    csr_reg_rc('h10, Bit#(8)'('hA5), 16, "CONST", "Constant Value", "Unrelated value field.");
+
+    csr_reg_def('h14, "FIFO_WR", "Exclusive FIFO write register");
+    csr_reg_fifo_wo('h14, fifo_write, "DATA", "FIFO Data", "Returns SLVERR when the FIFO is full.");
 
     csr_region_rw('h100, 256, table0.sub, table0.upd, "Table0", "Table 0");
 
@@ -67,6 +98,12 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
 
     method running  = rg_sts_run._write;
     method rxerr    = rg_sts_rxerr._write;
+    method sts_event = w_sts_evt._write;
+    method fifo_error_enq = fifo_error_read.enq;
+    method fifo_valid_enq = fifo_valid_read.enq;
+    method fifo_write_not_empty = fifo_write.notEmpty;
+    method fifo_write_first = fifo_write.first;
+    method fifo_write_deq = fifo_write.deq;
 
 endmodule
 
@@ -89,6 +126,46 @@ module [Module] mkTestBlueCSR(Empty);
     Reg#(Bit#(32)) rg_addr <- mkReg(0);
     Reg#(Bit#(32)) rg_data <- mkReg(0);
 
+    function Action expect_event(Bool expected);
+        action
+            let rsp <- accept_read_response(cfg.external);
+            if(tpl_2(rsp) != CSR_OKAY || unpack(tpl_1(rsp)[8]) != expected) begin
+                $display(
+                    "W1C event mismatch: expected %0d, got %0d (%0d)",
+                    expected,
+                    tpl_1(rsp)[8],
+                    tpl_2(rsp)
+                );
+                $finish(1);
+            end
+        endaction
+    endfunction
+
+    function Action expect_read(Bit#(32) expected_data, BlueCSRResponse_t expected_resp);
+        action
+            let rsp <- accept_read_response(cfg.external);
+            if(tpl_2(rsp) != expected_resp || tpl_1(rsp) != expected_data) begin
+                $display(
+                    "Read mismatch: expected data %08x response %0d, got %08x response %0d",
+                    expected_data,
+                    expected_resp,
+                    tpl_1(rsp),
+                    tpl_2(rsp)
+                );
+                $finish(1);
+            end
+        endaction
+    endfunction
+
+    function Action expect_write(BlueCSRResponse_t expected_resp);
+        action
+            let rsp <- accept_write_response(cfg.external);
+            if(rsp != expected_resp) begin
+                $display("Write response mismatch: expected %0d, got %0d", expected_resp, rsp);
+                $finish(1);
+            end
+        endaction
+    endfunction
 
     Stmt s = seq
 
@@ -109,6 +186,66 @@ module [Module] mkTestBlueCSR(Empty);
             endaction
         endpar
         expect_read_okay(cfg.external);
+
+        cfg.internal.sts_event(True);
+        delay(1);
+
+        issue_read(cfg.external, 'h08, CSR_INSECURE);
+        expect_event(True);
+
+        issue_write(cfg.external, 'h08, 'h100, 4'b0000, CSR_INSECURE);
+        expect_write_okay(cfg.external);
+        issue_read(cfg.external, 'h08, CSR_INSECURE);
+        expect_event(True);
+
+        issue_write(cfg.external, 'h08, 'h100, 4'b0010, CSR_INSECURE);
+        expect_write_okay(cfg.external);
+        issue_read(cfg.external, 'h08, CSR_INSECURE);
+        expect_event(False);
+
+        par
+            issue_write(cfg.external, 'h08, 'h100, 4'b0010, CSR_INSECURE);
+            cfg.internal.sts_event(True);
+        endpar
+        expect_write_okay(cfg.external);
+        issue_read(cfg.external, 'h08, CSR_INSECURE);
+        expect_event(True);
+
+        issue_read(cfg.external, 'h0C, CSR_INSECURE);
+        expect_read(0, CSR_SLVERR);
+
+        cfg.internal.fifo_error_enq('h5A);
+        issue_read(cfg.external, 'h0C, CSR_INSECURE);
+        expect_read('h5A, CSR_OKAY);
+
+        issue_read(cfg.external, 'h10, CSR_INSECURE);
+        expect_read('h00A50000, CSR_OKAY);
+
+        cfg.internal.fifo_valid_enq('h3C);
+        issue_read(cfg.external, 'h10, CSR_INSECURE);
+        expect_read('h00A5013C, CSR_OKAY);
+
+        issue_write(cfg.external, 'h14, 'h55, 4'b0011, CSR_INSECURE);
+        expect_write(CSR_SLVERR);
+        action
+            if(cfg.internal.fifo_write_not_empty) begin
+                $display("Partial FIFO write unexpectedly enqueued data");
+                $finish(1);
+            end
+        endaction
+
+        issue_write(cfg.external, 'h14, 'h66, 4'b0001, CSR_INSECURE);
+        expect_write(CSR_OKAY);
+        action
+            if(!cfg.internal.fifo_write_not_empty || cfg.internal.fifo_write_first != 'h66) begin
+                $display("FIFO write did not enqueue expected data");
+                $finish(1);
+            end
+        endaction
+
+        issue_write(cfg.external, 'h14, 'h77, 4'b0001, CSR_INSECURE);
+        expect_write(CSR_SLVERR);
+        cfg.internal.fifo_write_deq;
 
         delay(5);
         $display("Finished TB");
