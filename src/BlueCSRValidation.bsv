@@ -3,7 +3,7 @@ package BlueCSRValidation;
 import List :: *;
 import ModuleCollect :: *;
 
-import BlueCSRCtx :: *;
+import BlueCSRCore :: *;
 
 function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, dw)) c);
     let regmap_defs         = List::concat(List::map(get_regmap_def, c));

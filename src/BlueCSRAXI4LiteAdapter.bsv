@@ -3,7 +3,7 @@ package BlueCSRAXI4LiteAdapter;
 import GetPut :: *;
 
 import BlueAXI :: *;
-import BlueCSRCtx :: *;
+import BlueCSRCore :: *;
 
 interface BlueCSR_AXI4Lite_ifc#(numeric type aw, numeric type dw);
     interface AXI4_Lite_Slave_Rd_Fab#(aw, dw) s_rd;

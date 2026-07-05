@@ -7,7 +7,7 @@ import StmtFSM :: *;
 
 import BlueAXI :: *;
 
-import BlueCSRCtx :: *;
+import BlueCSRCore :: *;
 
 interface BlueCSRTbAccessor_ifc#(numeric type dw);
     method ActionValue#(Integer)                                  reg_offset(String reg_ident);

@@ -1,4 +1,4 @@
-package BlueCSRCtx;
+package BlueCSRCore;
 
 import List :: *;
 import DReg :: *;
