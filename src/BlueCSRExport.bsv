@@ -8,7 +8,7 @@ import BlueCSRValidation :: *;
 
 module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
 
-    let {coll_device_ifc, c} <- getCollection(ctx);
+    let {_, c} <- getCollection(ctx);
     let validation = validate_blue_csr_entries(c);
     let regdefs     = List::concat(List::map(get_reg_def, c));
     let regiondefs  = List::concat(List::map(get_reg_region_def, c));
@@ -162,7 +162,7 @@ endmodule
 
 module [Module] doc_blue_csr_markdown#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
 
-    let {coll_device_ifc, c} <- getCollection(ctx);
+    let {_, c} <- getCollection(ctx);
     let validation = validate_blue_csr_entries(c);
     let regdefs     = List::concat(List::map(get_reg_def, c));
     let regiondefs  = List::concat(List::map(get_reg_region_def, c));
@@ -295,7 +295,7 @@ endmodule
 
 module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String output_path)(BlueCSRExport_ifc);
 
-    let {coll_device_ifc, c} <- getCollection(ctx);
+    let {_, c} <- getCollection(ctx);
     let validation = validate_blue_csr_entries(c);
     let regdefs             = List::concat(List::map(get_reg_def, c));
     let regiondefs          = List::concat(List::map(get_reg_region_def, c));
@@ -310,13 +310,6 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
     Reg#(Bool) rg_done <- mkReg(False);
     Reg#(Bool) rg_success <- mkReg(False);
     Reg#(Bool) rg_started <- mkReg(False);
-
-    function String integerToHexDigitS(Integer n) = charToString(integerToHexDigit(n));
-
-    function String integerToHex(Integer n);
-        if (n < 16) return integerToHexDigitS(n);
-        else return strConcat(integerToHex(n / 16), integerToHexDigitS(n % 16));
-    endfunction
 
     function Bool has_read_access(Integer offs);
         Bool found = False;
@@ -360,19 +353,19 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
         if (has_read && has_write) return "rw";
         else if (has_read) return "r";
         else if (has_write) return "w";
-        else return "r";
+        else return "na";
     endfunction
 
-    function String get_field_sw(BlueCSRAccess_t access_type);
+    function String get_field_properties(BlueCSRAccess_t access_type);
         case (access_type)
-            CSR_RW:  return "rw";
-            CSR_RO:  return "r";
-            CSR_RC:  return "r";
-            CSR_WC:  return "rw";
-            CSR_WS:  return "rw";
-            CSR_WO:  return "w";
-            CSR_W1S: return "rw";
-            CSR_W1C: return "rw";
+            CSR_RW:  return "sw = rw;";
+            CSR_RO:  return "sw = r;";
+            CSR_RC:  return "sw = r;";
+            CSR_WC:  return "sw = rw; onwrite = wclr;";
+            CSR_WS:  return "sw = rw; onwrite = wset;";
+            CSR_WO:  return "sw = w;";
+            CSR_W1S: return "sw = rw; onwrite = woset;";
+            CSR_W1C: return "sw = rw; onwrite = woclr;";
         endcase
     endfunction
 
@@ -418,18 +411,19 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
 
                     $fwrite(fh, "  reg {\n");
                     $fwrite(fh, "    desc = \"%s\";\n", rd.description);
+                    $fwrite(fh, "    regwidth = %0d;\n", valueOf(dw));
 
                     for(Integer fi = 0; fi < length(regfields); fi = fi + 1) begin
                         let rf = regfields[fi];
                         if (rf.offset == rd.offset) begin
                             Integer msb = rf.bit_offset + rf.width - 1;
-                            $fwrite(fh, "    field { sw = %s; desc = \"%s\"; } %s[%0d:%0d] = %s;\n", get_field_sw(rf.access_type), rf.description, rf.identifier, msb, rf.bit_offset, rf.reset_value);
+                            $fwrite(fh, "    field { %s desc = \"%s\"; } %s[%0d:%0d] = %s;\n", get_field_properties(rf.access_type), rf.description, rf.identifier, msb, rf.bit_offset, rf.reset_value);
                             wrote_field = True;
                         end
                     end
 
                     if (!wrote_field) begin
-                        $fwrite(fh, "    field { sw = %s; desc = \"No field metadata\"; } RESERVED[0:0];\n", sw);
+                        $fwrite(fh, "    field { sw = %s; desc = \"No field metadata\"; } RESERVED[%0d:0];\n", sw, valueOf(dw) - 1);
                     end
 
                     $fwrite(fh, "  } %s @ 0x%s;\n", rd.identifier, integerToHex(rd.offset));

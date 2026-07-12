@@ -2,7 +2,6 @@ package BlueCSRCore;
 
 import List :: *;
 import DReg :: *;
-import FIFO :: *;
 import FIFOF :: *;
 import BUtils :: *;
 import Vector :: *;
@@ -118,11 +117,15 @@ typedef struct {
 
 typedef struct {
     Integer offs;
+    // Combinational value contribution. Multiple entries at one offset are
+    // OR-composed to form the register word.
     function Bit#(dw) _() f_read;
 } ReadOpPure_t#(numeric type dw);
 
 typedef struct {
     Integer offs;
+    // Effectful reads are separate because ActionValue methods participate in
+    // BSV scheduling (for example, FIFO reads dequeue an element).
     Bool exclusive;
     function Bool _() can_read;
     BlueCSR_Rsp_t#(dw) unavailable_rsp;
@@ -292,7 +295,8 @@ function Action field_w1c(Reg#(t) r, Integer field_offs, Bit#(dw) d, Bit#(b__) s
         Div#(dw, 8, b__)
     );
     action
-        Bit#(dw) d_clr = cExtend(r) & ~d;
+        Bit#(dw) current = cExtend(r) << fromInteger(field_offs);
+        Bit#(dw) d_clr = current & ~d;
         field_write_strobed(r, field_offs, d_clr, strb);
     endaction
 endfunction
@@ -304,7 +308,11 @@ function Action field_w1s(Reg#(t) r, Integer field_offs, Bit#(dw) d, Bit#(b__) s
         Mul#(b__, 8, dw),
         Div#(dw, 8, b__)
     );
-    return field_write_strobed(r, field_offs, d, strb);
+    action
+        Bit#(dw) current = cExtend(r) << fromInteger(field_offs);
+        Bit#(dw) d_set = current | d;
+        field_write_strobed(r, field_offs, d_set, strb);
+    endaction
 endfunction
 
 function Action field_wc(Reg#(t) r, Integer field_offs, Bit#(dw) d, Bit#(b__) strb)
@@ -418,6 +426,15 @@ module [BlueCSRCtx_t#(aw, dw)] csr_regmap_def#(String name, String desc)();
 endmodule
 
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_def#(Integer offs, String ident, String desc)();
+    Integer word_bytes = valueOf(TDiv#(dw, 8));
+    Integer address_space = 2 ** valueOf(aw);
+    if (offs < 0 || (offs + word_bytes) > address_space) begin
+        errorM("BlueCSR register " + ident + " lies outside the CSR address space.");
+    end
+    else if ((offs % word_bytes) != 0) begin
+        errorM("BlueCSR register " + ident + " offset must be aligned to the CSR word size.");
+    end
+
     RegMapEntry_t#(aw, dw) entry = tagged RegDef RegDef_t {
         offset: offs,
         identifier: ident,
@@ -427,14 +444,22 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_def#(Integer offs, String ident, String d
 endmodule
 
 module [BlueCSRCtx_t#(aw, dw)] csr_region_def#(Integer offs, Integer len, String ident, String desc)();
+    Integer word_bytes = valueOf(TDiv#(dw, 8));
+    Integer address_space = 2 ** valueOf(aw);
     if(len <= 0) begin
         errorM("BlueCSR region " + ident + " has non-positive length.");
+    end
+    else if(offs < 0 || (offs + len) > address_space) begin
+        errorM("BlueCSR region " + ident + " lies outside the CSR address space.");
     end
     else if(!is_power_of_two(len)) begin
         errorM("BlueCSR region " + ident + " length must be a power of two for mask-based address decoding.");
     end
     else if((offs % len) != 0) begin
         errorM("BlueCSR region " + ident + " offset must be aligned to its length for mask-based address decoding.");
+    end
+    else if((offs % word_bytes) != 0 || (len % word_bytes) != 0) begin
+        errorM("BlueCSR region " + ident + " must contain an aligned, integer number of CSR words.");
     end
 
     RegMapEntry_t#(aw, dw) entry = tagged RegRegionDef RegRegionDef_t {
@@ -515,6 +540,10 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_field#(BlueCSRAccess_t access_type, Integ
     );
     Reg#(t) r <- mkReg(rv);
 
+    if (bitpos < 0 || (bitpos + valueOf(sz_t)) > valueOf(dw)) begin
+        errorM("BlueCSR field " + ident + " lies outside its register word.");
+    end
+
     String reset_value = "0x" + integerToHex(bit_to_integer(pack(rv)));
 
     function Bit#(dw) do_read() = 0;
@@ -565,8 +594,15 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_field#(BlueCSRAccess_t access_type, Integ
         reset_value: reset_value
     };
 
-    addToCollection(write_entry);
-    addToCollection(read_entry);
+    // Only collect handlers that the declared access mode actually supports.
+    // Besides making exports accurate, this lets unsupported directions fall
+    // through to CSR_DECERR rather than looking like successful no-ops.
+    if (access_type != CSR_WO) begin
+        addToCollection(read_entry);
+    end
+    if (access_type != CSR_RO && access_type != CSR_RC) begin
+        addToCollection(write_entry);
+    end
     addToCollection(field_entry);
 
     return r;
@@ -639,7 +675,22 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_wo#(Integer offs, t rv, Integer bitpos, S
         Mul#(TDiv#(dw, 8), 8, dw),
         Div#(dw, 8, TDiv#(dw, 8))
     );
-    Reg#(t) _r <- csr_reg_field(CSR_WO, offs, rv, bitpos, ident, name, desc);
+    Reg#(t) _r <- csr_reg_wo_reg(offs, rv, bitpos, ident, name, desc);
+endmodule
+
+// Write-only fields historically returned Empty, which made their backing
+// value inaccessible to user logic.  Keep that API and offer an additive
+// variant for hardware that needs to consume the written value.
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_wo_reg#(Integer offs, t rv, Integer bitpos, String ident, String name, String desc)(Reg#(t))
+    provisos(
+        Bits#(t, sz_t),
+        FieldReadPure#(t, dw),
+        Add#(sz_t, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    Reg#(t) r <- csr_reg_field(CSR_WO, offs, rv, bitpos, ident, name, desc);
+    return r;
 endmodule
 
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c#(Integer offs, t rv, Integer bitpos, String ident, String fname, String desc)(Reg#(t))
@@ -982,15 +1033,10 @@ module [Module] create_blue_csr#(
 
     let {coll_device_ifc, c} <- getCollection(ctx);
 
-    // let validation = validate_blue_csr_entries(c);
-    // if (!validation.valid) begin
-    //     errorM(validation.errors);
-    // end
-
     let regdefs         = List::concat(List::map(get_reg_def, c));
     let regiondefs      = List::concat(List::map(get_reg_region_def, c));
     let access_policies = List::concat(List::map(get_access_policy_def, c));
-    let pure_reads      = List::concat(List::map(get_pure_read, c));
+    let value_reads     = List::concat(List::map(get_pure_read, c));
     let action_reads    = List::concat(List::map(get_action_read, c));
     let read_regions    = List::concat(List::map(get_read_region, c));
     let write_ops       = List::concat(List::map(get_write_op, c));
@@ -1012,17 +1058,6 @@ module [Module] create_blue_csr#(
     else
         f_req <- mkSizedFIFOF(1);
 
-
-    // Reg#(Bit#(1))               rg_valid    <- mkDReg(0);
-    // Reg#(Bit#(1))               rg_wr       <- mkReg(0);
-    // Reg#(Bit#(aw))              rg_addr     <- mkReg(0);
-    // Reg#(Bit#(dw))              rg_wdata    <- mkReg(0);
-    // Reg#(Bit#(TDiv#(dw, 8)))    rg_wstrb    <- mkReg(0);
-    // Reg#(BlueCSRProt_t)         rg_prot     <- mkDReg(CSR_INSECURE);
-
-    // Wire#(Bit#(dw))             w_rdata <- mkDWire(0);
-    // Wire#(BlueCSRResponse_t)    w_resp  <- mkDWire(CSR_SLVERR);
-
     function Bit#(dw) combine_reads(List#(ReadOpPure_t#(dw)) l);
         function Bit#(dw) fold_read(Bit#(dw) acc, ReadOpPure_t#(dw) rop);
             return acc | rop.f_read();
@@ -1040,6 +1075,26 @@ module [Module] create_blue_csr#(
         return List::foldl(fold_write, noAction, l);
     endfunction
 
+    function Action dispatch_read_triggers(List#(ReadTrigger_t) l);
+        function Action fold_trigger(Action acc, ReadTrigger_t op);
+            return action
+                acc;
+                op.trigger;
+            endaction;
+        endfunction
+        return List::foldl(fold_trigger, noAction, l);
+    endfunction
+
+    function Action dispatch_write_triggers(List#(WriteTrigger_t) l);
+        function Action fold_trigger(Action acc, WriteTrigger_t op);
+            return action
+                acc;
+                op.trigger;
+            endaction;
+        endfunction
+        return List::foldl(fold_trigger, noAction, l);
+    endfunction
+
     function Bool is_word_aligned(Bit#(aw) addr);
         Bit#(aw) byte_mask = fromInteger(word_bytes - 1);
         return (addr & byte_mask) == 0;
@@ -1055,7 +1110,7 @@ module [Module] create_blue_csr#(
     Rules write_rules = emptyRules;
 
     for (Integer i = 0; i < List::length(regdefs); i = i + 1) begin
-        let field_reads     = find_pure_reads_by_offs(pure_reads, regdefs[i].offset);
+        let field_values    = find_pure_reads_by_offs(value_reads, regdefs[i].offset);
         let field_actions   = find_action_reads_by_offs(action_reads, regdefs[i].offset);
         let rtrigs          = find_rtrig_by_offs(read_triggers, regdefs[i].offset);
         let wtrigs          = find_wtrig_by_offs(write_triggers, regdefs[i].offset);
@@ -1066,7 +1121,7 @@ module [Module] create_blue_csr#(
         if (List::length(field_actions) > 1) begin
             errorM("BlueCSR register at offset 0x" + integerToHex(regdefs[i].offset) + " has multiple action reads.");
         end
-        if ((List::length(field_actions) == 1) && field_actions[0].exclusive && (List::length(field_reads) > 0)) begin
+        if ((List::length(field_actions) == 1) && field_actions[0].exclusive && (List::length(field_values) > 0)) begin
             errorM("BlueCSR register at offset 0x" + integerToHex(regdefs[i].offset) + " has an exclusive action read mixed with value reads.");
         end
         if (List::length(write_actions) > 1) begin
@@ -1087,19 +1142,20 @@ module [Module] create_blue_csr#(
         //TODO: should triggers align with data output? (difficult as it moves through arbitrarily delayed FIFOs)
 
         if (List::length(field_actions) == 0) begin
-            read_rules = rJoinMutuallyExclusive(rules
-                rule rread_reg_allow(!req.wr && req_hit && req_rd_allowed);
-                    f_rsp.enq(
-                        BlueCSR_Rsp_t {
-                            rdata:  combine_reads(field_reads),
-                            resp:   CSR_OKAY
-                        }
-                    );
-                    if(List::length(rtrigs) > 0)
-                        rtrigs[0].trigger;
-                    f_req.deq;
-                endrule
-            endrules, read_rules);
+            if ((List::length(field_values) > 0) || (List::length(rtrigs) > 0)) begin
+                read_rules = rJoinMutuallyExclusive(rules
+                    rule rread_reg_allow(!req.wr && req_hit && req_rd_allowed);
+                        f_rsp.enq(
+                            BlueCSR_Rsp_t {
+                                rdata:  combine_reads(field_values),
+                                resp:   CSR_OKAY
+                            }
+                        );
+                        dispatch_read_triggers(rtrigs);
+                        f_req.deq;
+                    endrule
+                endrules, read_rules);
+            end
         end
         else begin
             read_rules = rJoinMutuallyExclusive(rules
@@ -1107,67 +1163,67 @@ module [Module] create_blue_csr#(
                     let action_rsp <- field_actions[0].f_read;
                     f_rsp.enq(
                         BlueCSR_Rsp_t {
-                            rdata:  combine_reads(field_reads) | action_rsp.rdata,
+                            rdata:  combine_reads(field_values) | action_rsp.rdata,
                             resp:   action_rsp.resp
                         }
                     );
-                    if(List::length(rtrigs) > 0)
-                        rtrigs[0].trigger;
+                    dispatch_read_triggers(rtrigs);
                     f_req.deq;
                 endrule
                 rule rread_reg_action_unavailable(!req.wr && req_hit && req_rd_allowed && !field_actions[0].can_read);
                     f_rsp.enq(
                         BlueCSR_Rsp_t {
-                            rdata: combine_reads(field_reads) | field_actions[0].unavailable_rsp.rdata,
+                            rdata: combine_reads(field_values) | field_actions[0].unavailable_rsp.rdata,
                             resp: field_actions[0].unavailable_rsp.resp
                         }
                     );
-                    if(List::length(rtrigs) > 0)
-                        rtrigs[0].trigger;
+                    dispatch_read_triggers(rtrigs);
                     f_req.deq;
                 endrule
             endrules, read_rules);
         end
 
         if (List::length(write_actions) == 0) begin
-            write_rules = rJoinMutuallyExclusive(rules
-                rule rwrite_reg_allow(req.wr && req_hit && req_wr_allowed);
-                    dispatch_reg_writes(reg_writes, req.wdata, req.wstrb);
-                    f_rsp.enq(
-                        BlueCSR_Rsp_t {
-                            rdata:  ?,
-                            resp:   CSR_OKAY
-                        }
-                    );
-                    if(List::length(wtrigs) > 0)
-                        wtrigs[0].trigger;
-                    f_req.deq;
-                endrule
-            endrules, write_rules);
+            if ((List::length(reg_writes) > 0) || (List::length(wtrigs) > 0)) begin
+                write_rules = rJoinMutuallyExclusive(rules
+                    rule rwrite_reg_allow(req.wr && req_hit && req_wr_allowed);
+                        dispatch_reg_writes(reg_writes, req.wdata, req.wstrb);
+                        f_rsp.enq(
+                            BlueCSR_Rsp_t {
+                                rdata:  0,
+                                resp:   CSR_OKAY
+                            }
+                        );
+                        dispatch_write_triggers(wtrigs);
+                        f_req.deq;
+                    endrule
+                endrules, write_rules);
+            end
         end
         else begin
             write_rules = rJoinMutuallyExclusive(rules
                 rule rwrite_reg_action_available(req.wr && req_hit && req_wr_allowed && write_actions[0].can_write(req.wdata, req.wstrb));
                     let action_resp <- write_actions[0].f_write(req.wdata, req.wstrb);
+                    if (action_resp == CSR_OKAY || action_resp == CSR_EXOKAY) begin
+                        dispatch_reg_writes(reg_writes, req.wdata, req.wstrb);
+                    end
                     f_rsp.enq(
                         BlueCSR_Rsp_t {
-                            rdata: ?,
+                            rdata: 0,
                             resp: action_resp
                         }
                     );
-                    if(List::length(wtrigs) > 0)
-                        wtrigs[0].trigger;
+                    dispatch_write_triggers(wtrigs);
                     f_req.deq;
                 endrule
                 rule rwrite_reg_action_unavailable(req.wr && req_hit && req_wr_allowed && !write_actions[0].can_write(req.wdata, req.wstrb));
                     f_rsp.enq(
                         BlueCSR_Rsp_t {
-                            rdata: ?,
+                            rdata: 0,
                             resp: write_actions[0].unavailable_resp
                         }
                     );
-                    if(List::length(wtrigs) > 0)
-                        wtrigs[0].trigger;
+                    dispatch_write_triggers(wtrigs);
                     f_req.deq;
                 endrule
             endrules, write_rules);
@@ -1191,9 +1247,10 @@ module [Module] create_blue_csr#(
         //region writes are only valid for entire words
         let req_wr_valid    = req.wstrb == unpack(-1);
 
-        read_rules = rJoinMutuallyExclusive(rules
+        if (List::length(region_reads) > 0) begin
+            read_rules = rJoinMutuallyExclusive(rules
             rule rread_region_allow(!req.wr && req_hit && req_aligned && req_rd_allowed);
-                Bit#(dw) read_data = (List::length(region_reads) > 0) ? region_reads[0].f_read(local_addr) : 0;
+                Bit#(dw) read_data = region_reads[0].f_read(local_addr);
                 f_rsp.enq(
                     BlueCSR_Rsp_t {
                         rdata:  read_data,
@@ -1202,23 +1259,24 @@ module [Module] create_blue_csr#(
                 );
                 f_req.deq;
             endrule
-        endrules, read_rules);
+            endrules, read_rules);
+        end
 
-        write_rules = rJoinMutuallyExclusive(rules
+        if (List::length(region_writes) > 0) begin
+            write_rules = rJoinMutuallyExclusive(rules
             rule rwrite_region_allow(req.wr && req_hit && req_aligned && req_wr_valid && req_wr_allowed);
-                if (List::length(region_writes) > 0) begin
-                    region_writes[0].f_write(local_addr, req.wdata);
-                end
+                region_writes[0].f_write(local_addr, req.wdata);
                 f_rsp.enq(
                     BlueCSR_Rsp_t {
-                        rdata:  ?,
+                        rdata:  0,
                         resp:   CSR_OKAY
                     }
                 );
                 f_req.deq;
                 //region writes are only allowed for fully enabled strobes
             endrule
-        endrules, write_rules);
+            endrules, write_rules);
+        end
     end
 
     read_rules = rJoinDescendingUrgency(read_rules,
@@ -1240,7 +1298,7 @@ module [Module] create_blue_csr#(
             rule rwrite_default(f_req.first.wr);
                 f_rsp.enq(
                     BlueCSR_Rsp_t {
-                        rdata:  ?,
+                        rdata:  0,
                         resp:   CSR_DECERR
                     }
                 );

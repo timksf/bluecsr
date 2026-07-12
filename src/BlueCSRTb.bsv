@@ -320,7 +320,7 @@ function Stmt expect_read_okay(BlueCSR_ifc#(aw, dw) cfg);
         action
             let bus_resp <- accept_read_response(cfg);
             if(tpl_2(bus_resp) != CSR_OKAY) begin
-                $write("Expected OKAY response to write but got "); $display(fshow(tpl_2(bus_resp)));
+                $write("Expected OKAY response to read but got "); $display(fshow(tpl_2(bus_resp)));
                 $finish();
             end
         endaction

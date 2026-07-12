@@ -19,6 +19,7 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
     let write_regions       = List::concat(List::map(get_write_region, c));
 
     Integer word_bytes = valueOf(TDiv#(dw, 8));
+    Integer address_space = 2 ** valueOf(aw);
 
     String errors = "";
     String map_name = "BlueCSR";
@@ -37,13 +38,27 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
 
     for(Integer ri = 0; ri < length(regdefs); ri = ri + 1) begin
         let rd = regdefs[ri];
+        if(rd.offset < 0 || (rd.offset + word_bytes) > address_space) begin
+            errors = append_newline(errors, "BlueCSR validation failed: register " + rd.identifier + " lies outside the CSR address space.");
+        end
+        if((rd.offset % word_bytes) != 0) begin
+            errors = append_newline(errors, "BlueCSR validation failed: register " + rd.identifier + " is not aligned to the CSR word size.");
+        end
         if(count_regdefs_at(regdefs, rd.offset) != 1) begin
             errors = append_newline(errors, "BlueCSR validation failed: register offset 0x" + integerToString(rd.offset) + " is defined multiple times.");
+        end
+        for(Integer rj = ri + 1; rj < length(regdefs); rj = rj + 1) begin
+            if(rd.identifier == regdefs[rj].identifier) begin
+                errors = append_newline(errors, "BlueCSR validation failed: register identifier " + rd.identifier + " is defined multiple times.");
+            end
         end
     end
 
     for(Integer ri = 0; ri < length(regiondefs); ri = ri + 1) begin
         let region = regiondefs[ri];
+        if(region.offset < 0 || (region.offset + region.length) > address_space) begin
+            errors = append_newline(errors, "BlueCSR validation failed: region " + region.identifier + " lies outside the CSR address space.");
+        end
         if(count_regions_exact(regiondefs, region.offset, region.length) != 1) begin
             errors = append_newline(errors, "BlueCSR validation failed: region " + region.identifier + " is defined multiple times.");
         end
@@ -64,6 +79,9 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
         end
         for(Integer rj = ri + 1; rj < length(regiondefs); rj = rj + 1) begin
             let other = regiondefs[rj];
+            if(region.identifier == other.identifier) begin
+                errors = append_newline(errors, "BlueCSR validation failed: region identifier " + region.identifier + " is defined multiple times.");
+            end
             if(byte_ranges_overlap(region.offset, region.length, other.offset, other.length)) begin
                 errors = append_newline(errors, "BlueCSR validation failed: regions " + region.identifier + " and " + other.identifier + " overlap.");
             end
@@ -98,6 +116,9 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
 
         for(Integer fj = fi + 1; fj < length(regfields); fj = fj + 1) begin
             let other = regfields[fj];
+            if((rf.offset == other.offset) && (rf.identifier == other.identifier)) begin
+                errors = append_newline(errors, "BlueCSR validation failed: field identifier " + rf.identifier + " is defined multiple times at register offset 0x" + integerToString(rf.offset) + ".");
+            end
             if((rf.offset == other.offset) && field_ranges_overlap(rf, other)) begin
                 errors = append_newline(errors, "BlueCSR validation failed: fields " + rf.identifier + " and " + other.identifier + " overlap in register offset 0x" + integerToString(rf.offset) + ".");
             end

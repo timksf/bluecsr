@@ -16,8 +16,10 @@ interface ModConfig_ifc;
     method Mode_t   mode;
     method Bit#(4)  dma_en;
     method Bit#(8)  lock;
+    method Bit#(4)  sticky_set;
 
     method Bit#(1)  sts_rstrb;
+    method Bit#(1)  sts_rstrb2;
 
     method Action running(Bool b);
     method Action rxerr(Bool b);
@@ -31,17 +33,17 @@ endinterface
 
 module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
 
-    Empty e = ?;
-
     Reg#(Bool)      rg_ctrl_en;
     Reg#(Mode_t)    rg_ctrl_mode;
     Reg#(Bit#(4))   rg_ctrl_sub_en;
     Reg#(Bit#(8))   rg_ctrl_lock;
+    Reg#(Bit#(4))   rg_ctrl_sticky_set;
 
     Reg#(Bool)      rg_sts_rxerr;
     Reg#(Bool)      rg_sts_run;
 
     Reg#(Bit#(1))   rg_sts_rstrb;
+    Reg#(Bit#(1))   rg_sts_rstrb2;
     Wire#(Bool)     w_sts_evt <- mkDWire(False);
 
     RegFile#(Bit#(8), Bit#(8)) table0 <- mkRegFileFull;
@@ -58,6 +60,7 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
     csr_reg_def ('h04, "CTRL", "Module control register");
     rg_ctrl_en      <- csr_reg_rw('h04, False,  0, "CTRLEN",    "Control Enable",               "Controls whether module is enabled or not.");
     rg_ctrl_mode    <- csr_reg_rw('h04, Mode1,  4, "MODE",      "Control Mode Setting",         "Controls operating mode.");
+    rg_ctrl_sticky_set <- csr_reg_w1s('h04, 4'b0010, 8, "STICKYSET", "Sticky Set", "Software can set but not clear these bits.");
     rg_ctrl_sub_en  <- csr_reg_ws('h04,     0, 16, "DMAEN",     "Control DMA Engine Enable",    "Controls whether DMA engine inside module is enabled.");
     rg_ctrl_lock    <- csr_reg_wc('h04,  'hFF, 24, "LOCK",      "Control Lock",                 "Controls all locks whatever those might be.");
     csr_reg_prot('h04, CSR_SEC_SECURE_ONLY, CSR_SEC_SECURE_ONLY);
@@ -68,6 +71,7 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
     csr_reg_w1c_evt('h08, False, w_sts_evt, 8, "EVENT", "Event Status", "Indicates a sticky hardware event.");
 
     rg_sts_rstrb    <- csr_reg_trigr('h08, False,  "STSRD", "Status Read Access Strobe", "Indicates a bus read access to this register.");
+    rg_sts_rstrb2   <- csr_reg_trigr('h08, False,  "STSRD2", "Second Status Read Access Strobe", "Checks multiple triggers at one offset.");
 
     csr_reg_def('h0C, "FIFO_RD", "Exclusive FIFO read register");
     csr_reg_fifo_ro('h0C, fifo_error_read, "DATA", "FIFO Data", "Returns SLVERR when the FIFO is empty.");
@@ -93,8 +97,11 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
     method en       = rg_ctrl_en;
     method mode     = rg_ctrl_mode;
     method dma_en   = rg_ctrl_sub_en;
+    method lock     = rg_ctrl_lock;
+    method sticky_set = rg_ctrl_sticky_set;
 
     method sts_rstrb = rg_sts_rstrb;
+    method sts_rstrb2 = rg_sts_rstrb2;
 
     method running  = rg_sts_run._write;
     method rxerr    = rg_sts_rxerr._write;
@@ -176,11 +183,31 @@ module [Module] mkTestBlueCSR(Empty);
         
         read_csr_region_range(cfg.external, rg_addr, rg_data, tb_lookup, "Table0", 28);
 
+        issue_write(cfg.external, 'h04, 'h00000100, 4'b0010, CSR_SECURE);
+        expect_write_okay(cfg.external);
+        action
+            if(cfg.internal.sticky_set != 4'b0011) begin
+                $display("W1S field did not preserve already-set bits");
+                $finish(1);
+            end
+        endaction
+
+        cfg.internal.rxerr(True);
+        delay(1);
+        issue_write(cfg.external, 'h08, 0, 4'b0001, CSR_INSECURE);
+        expect_write_okay(cfg.external);
+        issue_read(cfg.external, 'h08, CSR_INSECURE);
+        expect_read('h10, CSR_OKAY);
+        issue_write(cfg.external, 'h08, 'h10, 4'b0001, CSR_INSECURE);
+        expect_write_okay(cfg.external);
+        issue_read(cfg.external, 'h08, CSR_INSECURE);
+        expect_read(0, CSR_OKAY);
+
         par
             issue_read_reg(cfg.external, tb_lookup, "STS", CSR_INSECURE);
             action
-                if(cfg.internal.sts_rstrb != 1'b1) begin
-                    $display("Status register read strobe not asserted");
+                if(cfg.internal.sts_rstrb != 1'b1 || cfg.internal.sts_rstrb2 != 1'b1) begin
+                    $display("Status register read strobes not asserted");
                     $finish;
                 end
             endaction
@@ -213,6 +240,12 @@ module [Module] mkTestBlueCSR(Empty);
 
         issue_read(cfg.external, 'h0C, CSR_INSECURE);
         expect_read(0, CSR_SLVERR);
+
+        issue_write(cfg.external, 'h0C, 0, 4'b1111, CSR_INSECURE);
+        expect_write(CSR_DECERR);
+
+        issue_read(cfg.external, 'h14, CSR_INSECURE);
+        expect_read(0, CSR_DECERR);
 
         cfg.internal.fifo_error_enq('h5A);
         issue_read(cfg.external, 'h0C, CSR_INSECURE);
@@ -249,6 +282,7 @@ module [Module] mkTestBlueCSR(Empty);
 
         delay(5);
         $display("Finished TB");
+        $finish(0);
 
     endseq;
 

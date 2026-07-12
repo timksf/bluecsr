@@ -1,7 +1,18 @@
-WIP..
+BlueCSR defines synthesizable CSR maps in Bluespec and can export the same
+metadata as readable documentation or SystemRDL.
 
-Goal: Generic CSR definition from bluespec code with optional
-export to some form of structured format.
+#### Access execution model
+
+Ordinary fields contribute combinational read values and simple write actions.
+Those contributions are composed at each register offset. Side-effecting or
+fallible accesses, such as FIFO dequeue/enqueue, use a separate scheduled
+`ActionValue` path. This split is internal to map construction and is required
+for correct Bluespec scheduling; normal users should use the field, FIFO, and
+region constructors below rather than creating operation entries directly.
+
+Requests in a direction unsupported by a register or region return
+`CSR_DECERR`. A side-effecting handler can return a more specific response such
+as `CSR_SLVERR` when a mapped operation is temporarily unavailable.
 
 #### Bluespec API
 - `BlueCSRCtx_t` collection context used to build a CSR map and return internal module state.
@@ -17,6 +28,7 @@ Field definitions:
 - `csr_reg_ro` creates a read-only field backed by a register.
 - `csr_reg_rc` creates a read-constant field with a fixed value.
 - `csr_reg_wo` creates a write-only field.
+- `csr_reg_wo_reg` creates a write-only field and returns its backing register for hardware consumption.
 - `csr_reg_ws` creates a write-set field.
 - `csr_reg_wc` creates a write-clear field.
 - `csr_reg_w1c` creates a write-1-to-clear field.
@@ -39,6 +51,8 @@ Trigger fields:
 
 Runtime and export:
 - `create_blue_csr` builds the live BlueCSR interface from a `BlueCSRCtx_t` definition.
+- `mkBlueCSRMux` combines masked child address windows into one `BlueCSR_ifc`, translating each matching request to a child-local address.
+  Each `BlueCSRSubmap_t` supplies a `base` and `mask`; the lowest matching vector index wins and unmapped requests return `CSR_DECERR`. Requests are decoded directly into a child, and child responses feed a fall-through output buffer that stores data only under backpressure. The mux adds no response latency relative to a flat child instance and keeps one child transaction outstanding at a time.
 - `doc_blue_csr` renders a human-readable register map summary.
 - `doc_blue_csr_markdown` renders the register map as a Markdown table.
 - `export_systemrdl_blue_csr` writes the register map out as SystemRDL.
