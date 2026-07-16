@@ -24,6 +24,9 @@ interface ModConfig_ifc;
     method Action running(Bool b);
     method Action rxerr(Bool b);
     method Action sts_event(Bool b);
+    method Action irq_rx_event(Bool b);
+    method Action irq_tx_event(Bool b);
+    method Action irq_fault_event(Bool b);
     method Action fifo_error_enq(Bit#(8) value);
     method Action fifo_valid_enq(Bit#(8) value);
     method Bool fifo_write_not_empty;
@@ -45,6 +48,9 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
     Reg#(Bit#(1))   rg_sts_rstrb;
     Reg#(Bit#(1))   rg_sts_rstrb2;
     Wire#(Bool)     w_sts_evt <- mkDWire(False);
+    Wire#(Bool)     w_irq_rx_evt <- mkDWire(False);
+    Wire#(Bool)     w_irq_tx_evt <- mkDWire(False);
+    Wire#(Bool)     w_irq_fault_evt <- mkDWire(False);
 
     RegFile#(Bit#(8), Bit#(8)) table0 <- mkRegFileFull;
     FIFOF#(Bit#(8)) fifo_error_read <- mkSizedFIFOF(1);
@@ -92,6 +98,12 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
     csr_reg_def('h14, "FIFO_WR", "Exclusive FIFO write register");
     csr_reg_fifo_wo('h14, fifo_write, "DATA", "FIFO Data", "Returns SLVERR when the FIFO is full.");
 
+    csr_reg_def('h18, "IRQ_PENDING", "Interrupt pending register");
+    csr_reg_def('h1C, "IRQ_ENABLE", "Interrupt enable register");
+    csr_irq('h18, 'h1C, 0, 0, w_irq_rx_evt, "RX_IRQ", "Receive Interrupt", "A receive event is pending.");
+    csr_irq('h18, 'h1C, 1, 0, w_irq_tx_evt, "TX_IRQ", "Transmit Interrupt", "A transmit event is pending.");
+    csr_irq('h18, 'h1C, 2, 1, w_irq_fault_evt, "FAULT_IRQ", "Fault Interrupt", "A fault event is pending.");
+
     csr_region_rw('h100, 256, table0.sub, table0.upd, "Table0", "Table 0");
 
     method en       = rg_ctrl_en;
@@ -106,6 +118,9 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
     method running  = rg_sts_run._write;
     method rxerr    = rg_sts_rxerr._write;
     method sts_event = w_sts_evt._write;
+    method irq_rx_event = w_irq_rx_evt._write;
+    method irq_tx_event = w_irq_tx_evt._write;
+    method irq_fault_event = w_irq_fault_evt._write;
     method fifo_error_enq = fifo_error_read.enq;
     method fifo_valid_enq = fifo_valid_read.enq;
     method fifo_write_not_empty = fifo_write.notEmpty;
@@ -115,8 +130,8 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
 endmodule
 
 (* synthesize *)
-module mk_config(BlueCSRAccess_ifc#(32, 32, ModConfig_ifc));
-    BlueCSRAccess_ifc#(32, 32, ModConfig_ifc) cfg <- create_blue_csr(module_config, False);
+module mk_config(BlueCSRAccess_ifc#(32, 32, 2, ModConfig_ifc));
+    BlueCSRAccess_ifc#(32, 32, 2, ModConfig_ifc) cfg <- create_blue_csr(module_config, False);
     BlueCSRExport_ifc rdl_export <- export_systemrdl_blue_csr(module_config, "sim/testBlueCSR.rdl");
 
     RegMapDoc_t#(32) doc <- doc_blue_csr(module_config);
@@ -279,6 +294,61 @@ module [Module] mkTestBlueCSR(Empty);
         issue_write(cfg.external, 'h14, 'h77, 4'b0001, CSR_INSECURE);
         expect_write(CSR_SLVERR);
         cfg.internal.fifo_write_deq;
+
+        cfg.internal.irq_rx_event(True);
+        delay(1);
+        action
+            if(cfg.external.irqs.lines[0] || cfg.external.irqs.lines[1]) begin
+                $display("Masked interrupt unexpectedly asserted an IRQ line");
+                $finish(1);
+            end
+        endaction
+        issue_read(cfg.external, 'h18, CSR_INSECURE);
+        expect_read(1, CSR_OKAY);
+
+        issue_write(cfg.external, 'h1C, 7, 4'b0001, CSR_INSECURE);
+        expect_write(CSR_OKAY);
+        par
+            cfg.internal.irq_tx_event(True);
+            cfg.internal.irq_fault_event(True);
+        endpar
+        delay(1);
+        action
+            if(!cfg.external.irqs.lines[0] || !cfg.external.irqs.lines[1]) begin
+                $display("Enabled pending interrupts did not assert both IRQ lines");
+                $finish(1);
+            end
+        endaction
+
+        issue_write(cfg.external, 'h18, 1, 4'b0001, CSR_INSECURE);
+        expect_write(CSR_OKAY);
+        delay(1);
+        action
+            if(!cfg.external.irqs.lines[0] || !cfg.external.irqs.lines[1]) begin
+                $display("Clearing RX incorrectly removed TX from the shared IRQ line");
+                $finish(1);
+            end
+        endaction
+
+        issue_write(cfg.external, 'h18, 2, 4'b0001, CSR_INSECURE);
+        expect_write(CSR_OKAY);
+        delay(1);
+        action
+            if(cfg.external.irqs.lines[0] || !cfg.external.irqs.lines[1]) begin
+                $display("Shared IRQ line did not deassert after its last pending source cleared");
+                $finish(1);
+            end
+        endaction
+
+        issue_write(cfg.external, 'h18, 4, 4'b0001, CSR_INSECURE);
+        expect_write(CSR_OKAY);
+        delay(1);
+        action
+            if(cfg.external.irqs.lines[0] || cfg.external.irqs.lines[1]) begin
+                $display("IRQ vector did not clear after all pending fields cleared");
+                $finish(1);
+            end
+        endaction
 
         delay(5);
         $display("Finished TB");

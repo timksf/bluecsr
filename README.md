@@ -1,6 +1,14 @@
 BlueCSR defines synthesizable CSR maps in Bluespec and can export the same
 metadata as readable documentation or SystemRDL.
 
+
+#### Interrupt outputs
+
+`csr_irq` turns an event strobe into a sticky W1C pending field and combines it
+with an RW enable field. `create_blue_csr` ORs each enabled pending source onto
+its selected `IRQLines_ifc` output, so multiple fields may safely share a line
+and one CSR block may expose multiple lines.
+
 #### Access execution model
 
 Ordinary fields contribute combinational read values and simple write actions.
@@ -33,6 +41,8 @@ Field definitions:
 - `csr_reg_wc` creates a write-clear field.
 - `csr_reg_w1c` creates a write-1-to-clear field.
 - `csr_reg_w1c_evt` creates a single-bit write-1-to-clear field with a Boolean hardware event input that takes priority over software clearing.
+- `csr_reg_w1c_evt_reg` is the same event field and returns its pending-state register for hardware use.
+- `csr_irq` creates an event-latched W1C pending field and its RW enable field, then contributes `pending && enable` to a selected external IRQ line. Multiple fields may OR onto one line, and one map may drive multiple lines.
 - `csr_reg_w1s` creates a write-1-to-set field.
 - `csr_reg_fifo_ro` creates an exclusive, LSB-aligned FIFO read that returns `CSR_SLVERR` when empty. FIFO widths must be byte multiples no wider than the CSR data width.
 - `csr_reg_fifo_ro_valid` creates a non-failing FIFO read with byte-multiple data at the least-significant bits and a valid bit immediately above it. The FIFO element width plus one must fit in the CSR data width.
@@ -50,15 +60,14 @@ Trigger fields:
 - `csr_reg_trigrw` creates a trigger bit that pulses on reads and writes.
 
 Runtime and export:
-- `create_blue_csr` builds the live BlueCSR interface from a `BlueCSRCtx_t` definition.
-- `mkBlueCSRMux` combines masked child address windows into one `BlueCSR_ifc`, translating each matching request to a child-local address.
-  Each `BlueCSRSubmap_t` supplies a `base` and `mask`; the lowest matching vector index wins and unmapped requests return `CSR_DECERR`. Requests are decoded directly into a child, and child responses feed a fall-through output buffer that stores data only under backpressure. The mux adds no response latency relative to a flat child instance and keeps one child transaction outstanding at a time.
+- `create_blue_csr` builds the live BlueCSR interface from a `BlueCSRCtx_t` definition. Its inferred `ni` parameter configures the external IRQ vector width.
 - `doc_blue_csr` renders a human-readable register map summary.
 - `doc_blue_csr_markdown` renders the register map as a Markdown table.
 - `export_systemrdl_blue_csr` writes the register map out as SystemRDL.
 
 Interfaces and types:
-- `BlueCSR_ifc` request and response interface for the transactional CSR bus.
+- `IRQLines_ifc#(n)` is the shared vector subinterface whose `lines` method returns `Vector#(n, Bool)`.
+- `BlueCSR_ifc#(aw, dw, ni)` contains request and response interfaces plus `IRQLines_ifc#(ni) irqs`.
 - `BlueCSRAccess_ifc` bundle containing the external CSR interface and the internal user interface.
 - `BlueCSR_Req_t` request payload type.
 - `BlueCSR_Rsp_t` response payload type.
@@ -69,4 +78,4 @@ Interfaces and types:
 
 AXI4-Lite adapter API:
 - `mkBlueCSRAXI4LiteAdapter` bridges a `BlueCSR_ifc` instance to AXI4-Lite slave read and write channels.
-- `BlueCSR_AXI4Lite_ifc` AXI4-Lite slave-facing interface returned by the adapter.
+- `BlueCSR_AXI4Lite_ifc#(aw, dw, ni)` contains the AXI4-Lite read/write slave interfaces and forwards the same `irqs` vector subinterface.

@@ -57,6 +57,10 @@ typedef struct {
     BlueCSRResponse_t resp;
 } BlueCSR_Rsp_t#(numeric type dw) deriving(Eq, Bits, FShow);
 
+interface IRQLines_ifc#(numeric type n);
+    method Vector#(n, Bool) lines;
+endinterface
+
 (*always_enabled*)
 interface BlueCSR_Fab_ifc#(numeric type aw, numeric type dw);
     (*prefix = ""*) method Action valid ((*port = "i_valid"*)   Bit#(1)             valid   );
@@ -71,10 +75,11 @@ interface BlueCSR_Fab_ifc#(numeric type aw, numeric type dw);
     (*result = "o_resp"*)   method BlueCSRResponse_t    resp;
 endinterface
 
-interface BlueCSR_ifc#(numeric type aw, numeric type dw);
+interface BlueCSR_ifc#(numeric type aw, numeric type dw, numeric type ni);
     //no pure server to allow easy expansion of this interface
     interface Put#(BlueCSR_Req_t#(aw, dw))  request;
     interface Get#(BlueCSR_Rsp_t#(dw))      response;
+    interface IRQLines_ifc#(ni)             irqs;
 endinterface
 
 typedef ModuleCollect#(RegMapEntry_t#(aw, dw), ifc) BlueCSRCtx_t#(numeric type aw, numeric type dw, type ifc);
@@ -169,6 +174,11 @@ typedef struct {
     function Action _() trigger;
 } WriteTrigger_t;
 
+typedef struct {
+    Integer line;
+    Bool active;
+} IRQSource_t;
+
 typedef union tagged {
     RegMapDef_t             RegMapDef;
     RegDef_t                RegDef;
@@ -183,6 +193,7 @@ typedef union tagged {
     WriteRegion_t#(aw, dw)  WriteRegion;
     ReadTrigger_t           ReadTrigger;
     WriteTrigger_t          WriteTrigger;
+    IRQSource_t             IRQSource;
 } RegMapEntry_t#(numeric type aw, numeric type dw);
 
 function List#(ReadOpPure_t#(dw)) get_pure_read(RegMapEntry_t#(aw, dw) regmap_entry) =
@@ -211,6 +222,8 @@ function List#(ReadTrigger_t) get_read_trigger(RegMapEntry_t#(aw, dw) regmap_ent
     regmap_entry matches tagged ReadTrigger .rr ? Cons(rr, Nil) : Nil;
 function List#(WriteTrigger_t) get_write_trigger(RegMapEntry_t#(aw, dw) regmap_entry) =
     regmap_entry matches tagged WriteTrigger .rr ? Cons(rr, Nil) : Nil;
+function List#(IRQSource_t) get_irq_source(RegMapEntry_t#(aw, dw) regmap_entry) =
+    regmap_entry matches tagged IRQSource .irq ? Cons(irq, Nil) : Nil;
 
 
 typedef struct {
@@ -277,7 +290,7 @@ function Action field_write_strobed(Reg#(t) r, Integer field_offs, Bit#(dw) d, B
         Vector#(TDiv#(dw, 8), Bit#(8)) cur_bytes = unpack(cur_word);
         Vector#(TDiv#(dw, 8), Bit#(8)) wr_bytes = unpack(d);
         for (Integer i = 0; i < valueOf(b__); i = i + 1) begin
-            if (unpack(strobe[i])) begin
+            if(unpack(strobe[i])) begin
                 cur_bytes[i] = wr_bytes[i];
             end
         end
@@ -340,13 +353,13 @@ endfunction
 function Integer bit_to_integer(Bit#(n) x);
     Integer res = 0;
     for (Integer i = 0; i < valueOf(n); i = i + 1)
-        if (x[i] == 1)
+        if(x[i] == 1)
             res = res + 2**i;
     return res;
 endfunction
 
 function String append_newline(String acc, String msg);
-    if (acc == "") return msg;
+    if(acc == "") return msg;
     else return acc + "\n" + msg;
 endfunction
 
@@ -361,7 +374,7 @@ endfunction
 function Integer count_regdefs_at(List#(RegDef_t) regdefs, Integer offs);
     Integer count = 0;
     for (Integer i = 0; i < length(regdefs); i = i + 1) begin
-        if (regdefs[i].offset == offs) begin
+        if(regdefs[i].offset == offs) begin
             count = count + 1;
         end
     end
@@ -393,7 +406,7 @@ endfunction
 function Integer count_regions_exact(List#(RegRegionDef_t) regions, Integer offs, Integer len);
     Integer count = 0;
     for (Integer i = 0; i < length(regions); i = i + 1) begin
-        if ((regions[i].offset == offs) && (regions[i].length == len)) begin
+        if((regions[i].offset == offs) && (regions[i].length == len)) begin
             count = count + 1;
         end
     end
@@ -403,7 +416,7 @@ endfunction
 function Integer count_access_policies_exact(List#(AccessPolicyDef_t) policies, Integer offs, Integer len);
     Integer count = 0;
     for (Integer i = 0; i < length(policies); i = i + 1) begin
-        if ((policies[i].offset == offs) && (policies[i].length == len)) begin
+        if((policies[i].offset == offs) && (policies[i].length == len)) begin
             count = count + 1;
         end
     end
@@ -413,7 +426,7 @@ endfunction
 function String integerToHexDigitS(Integer n) = charToString(integerToHexDigit(n));
 
 function String integerToHex(Integer n);
-    if (n < 16) return integerToHexDigitS(n);
+    if(n < 16) return integerToHexDigitS(n);
     else return strConcat(integerToHex(n / 16), integerToHexDigitS(n % 16));
 endfunction
 
@@ -428,10 +441,10 @@ endmodule
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_def#(Integer offs, String ident, String desc)();
     Integer word_bytes = valueOf(TDiv#(dw, 8));
     Integer address_space = 2 ** valueOf(aw);
-    if (offs < 0 || (offs + word_bytes) > address_space) begin
+    if(offs < 0 || (offs + word_bytes) > address_space) begin
         errorM("BlueCSR register " + ident + " lies outside the CSR address space.");
     end
-    else if ((offs % word_bytes) != 0) begin
+    else if((offs % word_bytes) != 0) begin
         errorM("BlueCSR register " + ident + " offset must be aligned to the CSR word size.");
     end
 
@@ -540,7 +553,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_field#(BlueCSRAccess_t access_type, Integ
     );
     Reg#(t) r <- mkReg(rv);
 
-    if (bitpos < 0 || (bitpos + valueOf(sz_t)) > valueOf(dw)) begin
+    if(bitpos < 0 || (bitpos + valueOf(sz_t)) > valueOf(dw)) begin
         errorM("BlueCSR field " + ident + " lies outside its register word.");
     end
 
@@ -597,10 +610,10 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_field#(BlueCSRAccess_t access_type, Integ
     // Only collect handlers that the declared access mode actually supports.
     // Besides making exports accurate, this lets unsupported directions fall
     // through to CSR_DECERR rather than looking like successful no-ops.
-    if (access_type != CSR_WO) begin
+    if(access_type != CSR_WO) begin
         addToCollection(read_entry);
     end
-    if (access_type != CSR_RO && access_type != CSR_RC) begin
+    if(access_type != CSR_RO && access_type != CSR_RC) begin
         addToCollection(write_entry);
     end
     addToCollection(field_entry);
@@ -705,7 +718,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c#(Integer offs, t rv, Integer bitpos, 
     return r;
 endmodule
 
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c_evt#(Integer offs, Bool rv, Bool evt, Integer bitpos, String ident, String fname, String desc)()
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c_evt_reg#(Integer offs, Bool rv, Bool evt, Integer bitpos, String ident, String fname, String desc)(Reg#(Bool))
     provisos(
         Add#(1, a__, dw),
         Mul#(TDiv#(dw, 8), 8, dw),
@@ -716,7 +729,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c_evt#(Integer offs, Bool rv, Bool evt,
 
     String reset_value = "0x" + integerToHex(bit_to_integer(pack(rv)));
 
-    rule update;
+    rule r_update_pending;
         r <= (r && !w_clear) || evt;
     endrule
 
@@ -750,6 +763,51 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c_evt#(Integer offs, Bool rv, Bool evt,
     addToCollection(write_entry);
     addToCollection(read_entry);
     addToCollection(field_entry);
+
+    return r;
+endmodule
+
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c_evt#(Integer offs, Bool rv, Bool evt, Integer bitpos, String ident, String fname, String desc)()
+    provisos(
+        Add#(1, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    Reg#(Bool) _r <- csr_reg_w1c_evt_reg(offs, rv, evt, bitpos, ident, fname, desc);
+endmodule
+
+// Add one event-latched interrupt field. Software clears PENDING with W1C and
+// controls ENABLE with RW. Multiple fields may contribute to the same line;
+// create_blue_csr OR-composes their enabled pending states.
+module [BlueCSRCtx_t#(aw, dw)] csr_irq#(Integer pending_offs, Integer enable_offs, Integer bitpos, Integer line, Bool event_strobe, String ident, String name, String desc)()
+    provisos(
+        Add#(1, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    Reg#(Bool) rg_pending <- csr_reg_w1c_evt_reg(
+        pending_offs,
+        False,
+        event_strobe,
+        bitpos,
+        ident,
+        name,
+        desc
+    );
+    Reg#(Bool) rg_enabled <- csr_reg_rw(
+        enable_offs,
+        False,
+        bitpos,
+        ident,
+        name,
+        "Enables " + name + "."
+    );
+
+    RegMapEntry_t#(aw, dw) irq_entry = tagged IRQSource IRQSource_t {
+        line: line,
+        active: rg_pending && rg_enabled
+    };
+    addToCollection(irq_entry);
 endmodule
 
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1s#(Integer offs, t rv, Integer bitpos, String ident, String fname, String desc)(Reg#(t))
@@ -875,7 +933,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_fifo_wo#(Integer offs, FIFOF#(t) fifo, St
 
     function ActionValue#(BlueCSRResponse_t) do_write(Bit#(dw) d, Bit#(TDiv#(dw, 8)) s);
         actionvalue
-            if (s == required_strobes) begin
+            if(s == required_strobes) begin
                 fifo.enq(unpack(truncate(d)));
             end
             return (s == required_strobes) ? CSR_OKAY : CSR_SLVERR;
@@ -1024,12 +1082,9 @@ interface BusAccess_ifc#(type ext_ifc, type int_ifc);
 endinterface
 
 typedef BusAccess_ifc#(BlueCSR_Fab_ifc#(aw, dw), int_ifc)   BlueCSRAccess_Fab_ifc#(numeric type aw, numeric type dw, type int_ifc);
-typedef BusAccess_ifc#(BlueCSR_ifc#(aw, dw), int_ifc)       BlueCSRAccess_ifc#(numeric type aw, numeric type dw, type int_ifc);
+typedef BusAccess_ifc#(BlueCSR_ifc#(aw, dw, ni), int_ifc)   BlueCSRAccess_ifc#(numeric type aw, numeric type dw, numeric type ni, type int_ifc);
 
-module [Module] create_blue_csr#(
-        BlueCSRCtx_t#(aw, dw, i) ctx,
-        Bool buffer_in
-    )(BlueCSRAccess_ifc#(aw, dw, i));
+module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, Bool buffer_in)(BlueCSRAccess_ifc#(aw, dw, ni, i));
 
     let {coll_device_ifc, c} <- getCollection(ctx);
 
@@ -1044,8 +1099,16 @@ module [Module] create_blue_csr#(
     let write_regions   = List::concat(List::map(get_write_region, c));
     let read_triggers   = List::concat(List::map(get_read_trigger, c));
     let write_triggers  = List::concat(List::map(get_write_trigger, c));
+    let irq_sources     = List::concat(List::map(get_irq_source, c));
 
     Integer word_bytes = valueOf(TDiv#(dw, 8));
+
+    for (Integer i = 0; i < List::length(irq_sources); i = i + 1) begin
+        let irq = irq_sources[i];
+        if(irq.line < 0 || irq.line >= valueOf(ni)) begin
+            errorM("BlueCSR IRQ line " + integerToString(irq.line) + " lies outside the configured " + integerToString(valueOf(ni)) + "-line vector.");
+        end
+    end
 
     FIFOF#(BlueCSR_Req_t#(aw, dw))  f_req;
     FIFOF#(BlueCSR_Rsp_t#(dw))      f_rsp <- mkBypassFIFOF;
@@ -1118,16 +1181,16 @@ module [Module] create_blue_csr#(
         let reg_writes      = find_write_ops_by_offs(write_ops, regdefs[i].offset);
         let write_actions   = find_action_writes_by_offs(action_writes, regdefs[i].offset);
 
-        if (List::length(field_actions) > 1) begin
+        if(List::length(field_actions) > 1) begin
             errorM("BlueCSR register at offset 0x" + integerToHex(regdefs[i].offset) + " has multiple action reads.");
         end
-        if ((List::length(field_actions) == 1) && field_actions[0].exclusive && (List::length(field_values) > 0)) begin
+        if((List::length(field_actions) == 1) && field_actions[0].exclusive && (List::length(field_values) > 0)) begin
             errorM("BlueCSR register at offset 0x" + integerToHex(regdefs[i].offset) + " has an exclusive action read mixed with value reads.");
         end
-        if (List::length(write_actions) > 1) begin
+        if(List::length(write_actions) > 1) begin
             errorM("BlueCSR register at offset 0x" + integerToHex(regdefs[i].offset) + " has multiple action writes.");
         end
-        if ((List::length(write_actions) == 1) && write_actions[0].exclusive && (List::length(reg_writes) > 0)) begin
+        if((List::length(write_actions) == 1) && write_actions[0].exclusive && (List::length(reg_writes) > 0)) begin
             errorM("BlueCSR register at offset 0x" + integerToHex(regdefs[i].offset) + " has an exclusive action write mixed with other writes.");
         end
 
@@ -1141,8 +1204,8 @@ module [Module] create_blue_csr#(
 
         //TODO: should triggers align with data output? (difficult as it moves through arbitrarily delayed FIFOs)
 
-        if (List::length(field_actions) == 0) begin
-            if ((List::length(field_values) > 0) || (List::length(rtrigs) > 0)) begin
+        if(List::length(field_actions) == 0) begin
+            if((List::length(field_values) > 0) || (List::length(rtrigs) > 0)) begin
                 read_rules = rJoinMutuallyExclusive(rules
                     rule rread_reg_allow(!req.wr && req_hit && req_rd_allowed);
                         f_rsp.enq(
@@ -1183,8 +1246,8 @@ module [Module] create_blue_csr#(
             endrules, read_rules);
         end
 
-        if (List::length(write_actions) == 0) begin
-            if ((List::length(reg_writes) > 0) || (List::length(wtrigs) > 0)) begin
+        if(List::length(write_actions) == 0) begin
+            if((List::length(reg_writes) > 0) || (List::length(wtrigs) > 0)) begin
                 write_rules = rJoinMutuallyExclusive(rules
                     rule rwrite_reg_allow(req.wr && req_hit && req_wr_allowed);
                         dispatch_reg_writes(reg_writes, req.wdata, req.wstrb);
@@ -1204,7 +1267,7 @@ module [Module] create_blue_csr#(
             write_rules = rJoinMutuallyExclusive(rules
                 rule rwrite_reg_action_available(req.wr && req_hit && req_wr_allowed && write_actions[0].can_write(req.wdata, req.wstrb));
                     let action_resp <- write_actions[0].f_write(req.wdata, req.wstrb);
-                    if (action_resp == CSR_OKAY || action_resp == CSR_EXOKAY) begin
+                    if(action_resp == CSR_OKAY || action_resp == CSR_EXOKAY) begin
                         dispatch_reg_writes(reg_writes, req.wdata, req.wstrb);
                     end
                     f_rsp.enq(
@@ -1247,7 +1310,7 @@ module [Module] create_blue_csr#(
         //region writes are only valid for entire words
         let req_wr_valid    = req.wstrb == unpack(-1);
 
-        if (List::length(region_reads) > 0) begin
+        if(List::length(region_reads) > 0) begin
             read_rules = rJoinMutuallyExclusive(rules
             rule rread_region_allow(!req.wr && req_hit && req_aligned && req_rd_allowed);
                 Bit#(dw) read_data = region_reads[0].f_read(local_addr);
@@ -1262,7 +1325,7 @@ module [Module] create_blue_csr#(
             endrules, read_rules);
         end
 
-        if (List::length(region_writes) > 0) begin
+        if(List::length(region_writes) > 0) begin
             write_rules = rJoinMutuallyExclusive(rules
             rule rwrite_region_allow(req.wr && req_hit && req_aligned && req_wr_valid && req_wr_allowed);
                 region_writes[0].f_write(local_addr, req.wdata);
@@ -1313,6 +1376,19 @@ module [Module] create_blue_csr#(
     interface BlueCSR_ifc external;
         interface request  = toPut(f_req);
         interface response = toGet(f_rsp);
+
+        interface IRQLines_ifc irqs;
+            method Vector#(ni, Bool) lines;
+                Vector#(ni, Bool) result = replicate(False);
+                for (Integer i = 0; i < List::length(irq_sources); i = i + 1) begin
+                    let irq = irq_sources[i];
+                    if(irq.line >= 0 && irq.line < valueOf(ni)) begin
+                        result[irq.line] = result[irq.line] || irq.active;
+                    end
+                end
+                return result;
+            endmethod
+        endinterface
     endinterface
 
     interface internal = coll_device_ifc;

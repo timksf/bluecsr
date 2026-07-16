@@ -5,9 +5,10 @@ import GetPut :: *;
 import BlueAXI :: *;
 import BlueCSRCore :: *;
 
-interface BlueCSR_AXI4Lite_ifc#(numeric type aw, numeric type dw);
+interface BlueCSR_AXI4Lite_ifc#(numeric type aw, numeric type dw, numeric type ni);
     interface AXI4_Lite_Slave_Rd_Fab#(aw, dw) s_rd;
     interface AXI4_Lite_Slave_Wr_Fab#(aw, dw) s_wr;
+    interface IRQLines_ifc#(ni) irqs;
 endinterface
 
 function BlueCSRProt_t axi_lite_to_bluecsr_prot(AXI4_Lite_Prot prot);
@@ -24,11 +25,7 @@ function AXI4_Lite_Response bluecsr_to_axi_lite_resp(BlueCSRResponse_t resp);
     endcase;
 endfunction
 
-module mkBlueCSRAXI4LiteAdapter#(
-    BlueCSR_ifc#(aw, dw) csr,
-    Integer axi4_rd_buffer,
-    Integer axi4_wr_buffer
-    )(BlueCSR_AXI4Lite_ifc#(aw, dw));
+module mkBlueCSRAXI4LiteAdapter#(BlueCSR_ifc#(aw, dw, ni) csr, Integer axi4_rd_buffer, Integer axi4_wr_buffer)(BlueCSR_AXI4Lite_ifc#(aw, dw, ni));
 
     AXI4_Lite_Slave_Rd#(aw, dw) axi4l_rd <- mkAXI4_Lite_Slave_Rd(axi4_rd_buffer);
     AXI4_Lite_Slave_Wr#(aw, dw) axi4l_wr <- mkAXI4_Lite_Slave_Wr(axi4_wr_buffer);
@@ -92,6 +89,7 @@ module mkBlueCSRAXI4LiteAdapter#(
 
     interface s_rd = axi4l_rd.fab;
     interface s_wr = axi4l_wr.fab;
+    interface irqs = csr.irqs;
 endmodule
 
 endpackage

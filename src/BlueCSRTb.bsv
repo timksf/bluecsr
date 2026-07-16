@@ -70,7 +70,7 @@ function Maybe#(RegFieldDef_t) lookup_blue_csr_field_at_offset(BlueCSRTbLookup_t
 endfunction
 
 function Maybe#(RegFieldDef_t) lookup_blue_csr_field(BlueCSRTbLookup_t#(aw, dw) lookup, String reg_ident, String field_ident);
-    if (lookup_blue_csr_reg_offset(lookup, reg_ident) matches tagged Valid .reg_offs) begin
+    if(lookup_blue_csr_reg_offset(lookup, reg_ident) matches tagged Valid .reg_offs) begin
         return lookup_blue_csr_field_at_offset(lookup, reg_offs, field_ident);
     end
     else begin
@@ -91,7 +91,7 @@ endfunction
 function ActionValue#(Integer) expect_blue_csr_reg_offset(BlueCSRTbLookup_t#(aw, dw) lookup, String ident);
     actionvalue
         Integer rg_offs = ?;
-        if (lookup_blue_csr_reg_offset(lookup, ident) matches tagged Valid .offs) begin
+        if(lookup_blue_csr_reg_offset(lookup, ident) matches tagged Valid .offs) begin
             rg_offs = offs;
         end
         else begin
@@ -106,7 +106,7 @@ function ActionValue#(Integer) expect_blue_csr_field_bit(BlueCSRTbLookup_t#(aw, 
     actionvalue
         let reg_offs <- expect_blue_csr_reg_offset(lookup, reg_ident);
         Integer rg_bitpos = ?;
-        if (lookup_blue_csr_field_at_offset(lookup, reg_offs, field_ident) matches tagged Valid .field) begin
+        if(lookup_blue_csr_field_at_offset(lookup, reg_offs, field_ident) matches tagged Valid .field) begin
             rg_bitpos = field.bit_offset;
         end
         else begin
@@ -126,11 +126,7 @@ function BlueCSRResponse_t axi4_lite_to_bluecsr_resp(AXI4_Lite_Response resp);
     endcase;
 endfunction
 
-module [Module] mkBlueCSRTbAccessorAXI4Lite#(
-    BlueCSRTbLookup_t#(aw, dw) lookup,
-    AXI4_Lite_Master_Rd#(aw, dw) rd,
-    AXI4_Lite_Master_Wr#(aw, dw) wr
-)(BlueCSRTbAccessor_ifc#(dw));
+module [Module] mkBlueCSRTbAccessorAXI4Lite#(BlueCSRTbLookup_t#(aw, dw) lookup, AXI4_Lite_Master_Rd#(aw, dw) rd, AXI4_Lite_Master_Wr#(aw, dw) wr)(BlueCSRTbAccessor_ifc#(dw));
     method ActionValue#(Integer) reg_offset(String reg_ident);
         let offs <- expect_blue_csr_reg_offset(lookup, reg_ident);
         return offs;
@@ -190,10 +186,7 @@ module [Module] mkBlueCSRTbAccessorAXI4Lite#(
     endmethod
 endmodule
 
-module [Module] mkBlueCSRTbAccessorBlueCSR#(
-    BlueCSRTbLookup_t#(aw, dw) lookup,
-    BlueCSR_ifc#(aw, dw) csr
-)(BlueCSRTbAccessor_ifc#(dw));
+module [Module] mkBlueCSRTbAccessorBlueCSR#(BlueCSRTbLookup_t#(aw, dw) lookup, BlueCSR_ifc#(aw, dw, ni) csr)(BlueCSRTbAccessor_ifc#(dw));
     method ActionValue#(Integer) reg_offset(String reg_ident);
         let offs <- expect_blue_csr_reg_offset(lookup, reg_ident);
         return offs;
@@ -260,7 +253,7 @@ module [Module] mkBlueCSRTbAccessorBlueCSR#(
     endmethod
 endmodule
 
-function Action issue_read(BlueCSR_ifc#(aw, dw) cfg, Bit#(aw) addr, BlueCSRProt_t prot);
+function Action issue_read(BlueCSR_ifc#(aw, dw, ni) cfg, Bit#(aw) addr, BlueCSRProt_t prot);
     action
         cfg.request.put(
             BlueCSR_Req_t {
@@ -274,14 +267,14 @@ function Action issue_read(BlueCSR_ifc#(aw, dw) cfg, Bit#(aw) addr, BlueCSRProt_
     endaction
 endfunction
 
-function ActionValue#(Tuple2#(Bit#(dw), BlueCSRResponse_t)) accept_read_response(BlueCSR_ifc#(aw, dw) cfg);
+function ActionValue#(Tuple2#(Bit#(dw), BlueCSRResponse_t)) accept_read_response(BlueCSR_ifc#(aw, dw, ni) cfg);
     actionvalue
         let r <- cfg.response.get;
         return tuple2(r.rdata, r.resp);
     endactionvalue
 endfunction
 
-function Action issue_write(BlueCSR_ifc#(aw, dw) cfg, Bit#(aw) addr, Bit#(dw) data, Bit#(TDiv#(dw, 8)) strobe, BlueCSRProt_t prot);
+function Action issue_write(BlueCSR_ifc#(aw, dw, ni) cfg, Bit#(aw) addr, Bit#(dw) data, Bit#(TDiv#(dw, 8)) strobe, BlueCSRProt_t prot);
     action
         cfg.request.put(
             BlueCSR_Req_t {
@@ -295,14 +288,14 @@ function Action issue_write(BlueCSR_ifc#(aw, dw) cfg, Bit#(aw) addr, Bit#(dw) da
     endaction
 endfunction
 
-function ActionValue#(BlueCSRResponse_t) accept_write_response(BlueCSR_ifc#(aw, dw) cfg);
+function ActionValue#(BlueCSRResponse_t) accept_write_response(BlueCSR_ifc#(aw, dw, ni) cfg);
     actionvalue
         let r <- cfg.response.get;
         return r.resp;
     endactionvalue
 endfunction
 
-function Stmt expect_write_okay(BlueCSR_ifc#(aw, dw) cfg);
+function Stmt expect_write_okay(BlueCSR_ifc#(aw, dw, ni) cfg);
     Stmt s = seq
         action
             let bus_resp <- accept_write_response(cfg);
@@ -315,7 +308,7 @@ function Stmt expect_write_okay(BlueCSR_ifc#(aw, dw) cfg);
     return s;
 endfunction
 
-function Stmt expect_read_okay(BlueCSR_ifc#(aw, dw) cfg);
+function Stmt expect_read_okay(BlueCSR_ifc#(aw, dw, ni) cfg);
     Stmt s = seq
         action
             let bus_resp <- accept_read_response(cfg);
@@ -328,9 +321,9 @@ function Stmt expect_read_okay(BlueCSR_ifc#(aw, dw) cfg);
     return s;
 endfunction
 
-function Stmt issue_read_reg(BlueCSR_ifc#(aw, dw) cfg, BlueCSRTbLookup_t#(aw, dw) lookup, String ident, BlueCSRProt_t prot);
+function Stmt issue_read_reg(BlueCSR_ifc#(aw, dw, ni) cfg, BlueCSRTbLookup_t#(aw, dw) lookup, String ident, BlueCSRProt_t prot);
     Stmt s = fail_blue_csr_lookup("register", ident);
-    if (lookup_blue_csr_reg_offset(lookup, ident) matches tagged Valid .offs) begin
+    if(lookup_blue_csr_reg_offset(lookup, ident) matches tagged Valid .offs) begin
         s = seq
             issue_read(cfg, fromInteger(offs), prot);
         endseq;
@@ -338,9 +331,9 @@ function Stmt issue_read_reg(BlueCSR_ifc#(aw, dw) cfg, BlueCSRTbLookup_t#(aw, dw
     return s;
 endfunction
 
-function Stmt issue_write_region(BlueCSR_ifc#(aw, dw) cfg, BlueCSRTbLookup_t#(aw, dw) lookup, String ident, Bit#(dw) data, Bit#(TDiv#(dw, 8)) strobe, BlueCSRProt_t prot);
+function Stmt issue_write_region(BlueCSR_ifc#(aw, dw, ni) cfg, BlueCSRTbLookup_t#(aw, dw) lookup, String ident, Bit#(dw) data, Bit#(TDiv#(dw, 8)) strobe, BlueCSRProt_t prot);
     Stmt s = fail_blue_csr_lookup("region", ident);
-    if (lookup_blue_csr_region_offset(lookup, ident) matches tagged Valid .offs) begin
+    if(lookup_blue_csr_region_offset(lookup, ident) matches tagged Valid .offs) begin
         s = seq
             issue_write(cfg, fromInteger(offs), data, strobe, prot);
         endseq;
@@ -348,7 +341,7 @@ function Stmt issue_write_region(BlueCSR_ifc#(aw, dw) cfg, BlueCSRTbLookup_t#(aw
     return s;
 endfunction
 
-function Stmt read_csr_range(BlueCSR_ifc#(aw, dw) cfg, Reg#(Bit#(aw)) rg_addr, Reg#(Bit#(dw)) rg_data, Integer lo_addr, Integer hi_addr);
+function Stmt read_csr_range(BlueCSR_ifc#(aw, dw, ni) cfg, Reg#(Bit#(aw)) rg_addr, Reg#(Bit#(dw)) rg_data, Integer lo_addr, Integer hi_addr);
     Stmt s = seq
         rg_addr <= fromInteger(lo_addr);
         while(rg_addr < fromInteger(hi_addr)) seq
@@ -364,20 +357,20 @@ function Stmt read_csr_range(BlueCSR_ifc#(aw, dw) cfg, Reg#(Bit#(aw)) rg_addr, R
     return s;
 endfunction
 
-function Stmt read_csr_reg_range(BlueCSR_ifc#(aw, dw) cfg, Reg#(Bit#(aw)) rg_addr, Reg#(Bit#(dw)) rg_data, BlueCSRTbLookup_t#(aw, dw) lookup, String lo_ident, String hi_ident);
+function Stmt read_csr_reg_range(BlueCSR_ifc#(aw, dw, ni) cfg, Reg#(Bit#(aw)) rg_addr, Reg#(Bit#(dw)) rg_data, BlueCSRTbLookup_t#(aw, dw) lookup, String lo_ident, String hi_ident);
     Stmt s = fail_blue_csr_lookup("register", lo_ident);
-    if (lookup_blue_csr_reg_offset(lookup, lo_ident) matches tagged Valid .lo_offs) begin
+    if(lookup_blue_csr_reg_offset(lookup, lo_ident) matches tagged Valid .lo_offs) begin
         s = fail_blue_csr_lookup("register", hi_ident);
-        if (lookup_blue_csr_reg_offset(lookup, hi_ident) matches tagged Valid .hi_offs) begin
+        if(lookup_blue_csr_reg_offset(lookup, hi_ident) matches tagged Valid .hi_offs) begin
             s = read_csr_range(cfg, rg_addr, rg_data, lo_offs, hi_offs);
         end
     end
     return s;
 endfunction
 
-function Stmt read_csr_region_range(BlueCSR_ifc#(aw, dw) cfg, Reg#(Bit#(aw)) rg_addr, Reg#(Bit#(dw)) rg_data, BlueCSRTbLookup_t#(aw, dw) lookup, String ident, Integer byte_count);
+function Stmt read_csr_region_range(BlueCSR_ifc#(aw, dw, ni) cfg, Reg#(Bit#(aw)) rg_addr, Reg#(Bit#(dw)) rg_data, BlueCSRTbLookup_t#(aw, dw) lookup, String ident, Integer byte_count);
     Stmt s = fail_blue_csr_lookup("region", ident);
-    if (lookup_blue_csr_region_offset(lookup, ident) matches tagged Valid .offs) begin
+    if(lookup_blue_csr_region_offset(lookup, ident) matches tagged Valid .offs) begin
         s = read_csr_range(cfg, rg_addr, rg_data, offs, offs + byte_count);
     end
     return s;
