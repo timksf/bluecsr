@@ -57,6 +57,11 @@ typedef struct {
     BlueCSRResponse_t resp;
 } BlueCSR_Rsp_t#(numeric type dw) deriving(Eq, Bits, FShow);
 
+typedef struct {
+    Bit#(dw) data;
+    Bit#(TDiv#(dw, 8)) strobe;
+} CSRRegWrite_t#(numeric type dw) deriving(Bits);
+
 interface IRQLines_ifc#(numeric type n);
     method Vector#(n, Bool) lines;
 endinterface
@@ -350,6 +355,25 @@ function Action field_ws(Reg#(t) r, Integer field_offs, Bit#(dw) d, Bit#(b__) st
     endaction
 endfunction
 
+function Action field_write_access(Reg#(t) r, BlueCSRAccess_t access_type, Integer field_offs, Bit#(dw) d, Bit#(b__) strb)
+    provisos(
+        Bits#(t, st),
+        Add#(st, a__, dw),
+        Mul#(b__, 8, dw),
+        Div#(dw, 8, b__)
+    );
+    action
+        case(access_type)
+            CSR_RW, CSR_WO: field_write_strobed(r, field_offs, d, strb);
+            CSR_WC:         field_wc(r, field_offs, d, strb);
+            CSR_WS:         field_ws(r, field_offs, d, strb);
+            CSR_W1S:        field_w1s(r, field_offs, d, strb);
+            CSR_W1C:        field_w1c(r, field_offs, d, strb);
+            default:        noAction;
+        endcase
+    endaction
+endfunction
+
 function Integer bit_to_integer(Bit#(n) x);
     Integer res = 0;
     for (Integer i = 0; i < valueOf(n); i = i + 1)
@@ -543,54 +567,49 @@ module [BlueCSRCtx_t#(aw, dw)] csr_region_rw#(Integer offs, Integer len, functio
     Empty _ <- csr_region_def(offs, len, ident, desc);
 endmodule
 
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_field#(BlueCSRAccess_t access_type, Integer offs, t rv, Integer bitpos, String ident, String name, String desc)(Reg#(t))
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_field_ops#(BlueCSRAccess_t access_type, Integer offs, t rv, Integer bitpos, function Bit#(dw) field_rd(), function Bit#(dw) field_const(), function Action write_field(BlueCSRAccess_t write_access, Bit#(dw) d, Bit#(TDiv#(dw, 8)) s), String ident, String name, String desc)()
     provisos(
         Bits#(t, sz_t),
-        FieldReadPure#(t, dw),
-        Add#(sz_t, a__, dw),
         Mul#(TDiv#(dw, 8), 8, dw),
         Div#(dw, 8, TDiv#(dw, 8))
     );
-    Reg#(t) r <- mkReg(rv);
-
     if(bitpos < 0 || (bitpos + valueOf(sz_t)) > valueOf(dw)) begin
         errorM("BlueCSR field " + ident + " lies outside its register word.");
     end
 
     String reset_value = "0x" + integerToHex(bit_to_integer(pack(rv)));
-
     function Bit#(dw) do_read() = 0;
     function Action do_write(Bit#(dw) d, Bit#(TDiv#(dw, 8)) s) = noAction;
 
     case (access_type)
         CSR_RW: begin
-            do_read = field_read_pure(r, bitpos);
-            do_write = field_write_strobed(r, bitpos);
+            do_read = field_rd;
+            do_write = write_field(CSR_RW);
         end
         CSR_RO: begin
-            do_read = field_read_pure(r, bitpos);
+            do_read = field_rd;
         end
         CSR_RC: begin
-            do_read = field_read_pure(rv, bitpos);
+            do_read = field_const;
         end
         CSR_WO: begin
-            do_write = field_write_strobed(r, bitpos);
+            do_write = write_field(CSR_WO);
         end
         CSR_WC: begin
-            do_read = field_read_pure(r, bitpos);
-            do_write = field_wc(r, bitpos);
+            do_read = field_rd;
+            do_write = write_field(CSR_WC);
         end
         CSR_WS: begin
-            do_read = field_read_pure(r, bitpos);
-            do_write = field_ws(r, bitpos);
+            do_read = field_rd;
+            do_write = write_field(CSR_WS);
         end
         CSR_W1S: begin
-            do_read = field_read_pure(r, bitpos);
-            do_write = field_w1s(r, bitpos);
+            do_read = field_rd;
+            do_write = write_field(CSR_W1S);
         end
         CSR_W1C: begin
-            do_read = field_read_pure(r, bitpos);
-            do_write = field_w1c(r, bitpos);
+            do_read = field_rd;
+            do_write = write_field(CSR_W1C);
         end
     endcase
 
@@ -607,9 +626,6 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_field#(BlueCSRAccess_t access_type, Integ
         reset_value: reset_value
     };
 
-    // Only collect handlers that the declared access mode actually supports.
-    // Besides making exports accurate, this lets unsupported directions fall
-    // through to CSR_DECERR rather than looking like successful no-ops.
     if(access_type != CSR_WO) begin
         addToCollection(read_entry);
     end
@@ -617,103 +633,71 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_field#(BlueCSRAccess_t access_type, Integ
         addToCollection(write_entry);
     end
     addToCollection(field_entry);
-
-    return r;
 endmodule
 
-// Hardware-owned fields are readable through BlueCSR, while writes are
-// handled by a register-level action handler.  access_type is metadata for
-// export and does not create an ordinary software write operation.
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_hw#(BlueCSRAccess_t access_type, Integer offs, t rv, Integer bitpos, String ident, String name, String desc)(Reg#(t))
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_field#(BlueCSRAccess_t access_type, Integer offs, t rv, Integer bitpos, String ident, String name, String desc)(Reg#(t))
     provisos(
         Bits#(t, sz_t),
         FieldReadPure#(t, dw),
-        Add#(sz_t, a__, dw)
+        Add#(sz_t, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
     );
     Reg#(t) r <- mkReg(rv);
 
-    if(bitpos < 0 || (bitpos + valueOf(sz_t)) > valueOf(dw)) begin
-        errorM("BlueCSR field " + ident + " lies outside its register word.");
-    end
+    function Bit#(dw) field_rd() = field_read_pure(r, bitpos);
+    function Bit#(dw) field_const() = field_read_pure(rv, bitpos);
+    function Action write_field(BlueCSRAccess_t write_access, Bit#(dw) d, Bit#(TDiv#(dw, 8)) s) = field_write_access(r, write_access, bitpos, d, s);
 
-    String reset_value = "0x" + integerToHex(bit_to_integer(pack(rv)));
-    RegMapEntry_t#(aw, dw) read_entry = tagged ReadOpPure ReadOpPure_t {
-        offs: offs,
-        f_read: field_read_pure(r, bitpos)
-    };
-    RegMapEntry_t#(aw, dw) field_entry = tagged RegFieldDef RegFieldDef_t {
-        offset: offs,
-        identifier: ident,
-        name: name,
-        description: desc,
-        access_type: access_type,
-        bit_offset: bitpos,
-        width: valueOf(sz_t),
-        reset_value: reset_value
-    };
+    //populate operations based on access policy (unused ops get dropped)
+    csr_reg_field_ops(access_type, offs, rv, bitpos, field_rd, field_const, write_field, ident, name, desc);
 
-    addToCollection(read_entry);
-    addToCollection(field_entry);
     return r;
 endmodule
 
-// Add field metadata without creating storage or an access operation.
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_field_def#(BlueCSRAccess_t access_type, Integer offs, t rv, Integer bitpos, String ident, String name, String desc)()
-    provisos(Bits#(t, sz_t));
+//hardware-updatable fields keep their state private to BlueCSR. If HW updates in same cycle as SW updates, HW wins
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_hu#(BlueCSRAccess_t access_type, Integer offs, t rv, Integer bitpos, Bool hw_upd, t hw_upd_val, String ident, String name, String desc)(ReadOnly#(t))
+    provisos(
+        Bits#(t, sz_t),
+        FieldReadPure#(t, dw),
+        Add#(sz_t, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    Reg#(t) r <- mkReg(rv);
+    Wire#(Maybe#(t)) w_hardware_update <- mkDWire(tagged Invalid);
+    Wire#(Maybe#(CSRRegWrite_t#(dw))) w_software_write <- mkDWire(tagged Invalid);
 
-    if(bitpos < 0 || (bitpos + valueOf(sz_t)) > valueOf(dw)) begin
-        errorM("BlueCSR field " + ident + " lies outside its register word.");
-    end
+    function Bit#(dw) field_rd() = field_read_pure(r, bitpos);
+    function Bit#(dw) field_const() = field_read_pure(rv, bitpos);
+    function Action write_field(BlueCSRAccess_t write_access, Bit#(dw) d, Bit#(TDiv#(dw, 8)) s);
+        action
+            if(!isValid(w_hardware_update)) begin
+                w_software_write <= tagged Valid CSRRegWrite_t {
+                    data: d,
+                    strobe: s
+                };
+            end
+        endaction
+    endfunction
 
-    RegMapEntry_t#(aw, dw) field_entry = tagged RegFieldDef RegFieldDef_t {
-        offset: offs,
-        identifier: ident,
-        name: name,
-        description: desc,
-        access_type: access_type,
-        bit_offset: bitpos,
-        width: valueOf(sz_t),
-        reset_value: "0x" + integerToHex(bit_to_integer(pack(rv)))
-    };
-    addToCollection(field_entry);
-endmodule
+    rule r_hw_upd if(hw_upd);
+        w_hardware_update <= tagged Valid hw_upd_val;
+    endrule
 
-// Add one exclusive, side-effecting register write operation.  This can be
-// combined with hardware-owned fields at the same offset.
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_action_write#(
-    Integer offs,
-    function Bool can_write(Bit#(dw) data, Bit#(TDiv#(dw, 8)) strobe),
-    BlueCSRResponse_t unavailable_response,
-    function ActionValue#(BlueCSRResponse_t) write_fn(Bit#(dw) data, Bit#(TDiv#(dw, 8)) strobe)
-)();
-    RegMapEntry_t#(aw, dw) write_entry = tagged WriteOpAction WriteOpAction_t {
-        offs: offs,
-        exclusive: True,
-        can_write: can_write,
-        unavailable_resp: unavailable_response,
-        f_write: write_fn
-    };
-    addToCollection(write_entry);
-endmodule
+    //shared update rule to arbitrate HW and SW updates
+    rule r_apply_update;
+        if(w_hardware_update matches tagged Valid .new_value) begin
+            r <= new_value;
+        end
+        else if(w_software_write matches tagged Valid .write) begin
+            field_write_access(r, access_type, bitpos, write.data, write.strobe);
+        end
+    endrule
 
-// Add a pure register read contribution without adding field metadata.
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_read_value#(Integer offs, Bit#(dw) value)();
-    function Bit#(dw) do_read() = value;
-    RegMapEntry_t#(aw, dw) read_entry = tagged ReadOpPure ReadOpPure_t {
-        offs: offs,
-        f_read: do_read
-    };
-    addToCollection(read_entry);
-endmodule
-
-// Add a successful register write operation that intentionally has no effect.
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_write_noop#(Integer offs)();
-    function Action do_write(Bit#(dw) data, Bit#(TDiv#(dw, 8)) strobe) = noAction;
-    RegMapEntry_t#(aw, dw) write_entry = tagged WriteOp WriteOp_t {
-        offs: offs,
-        f_write: do_write
-    };
-    addToCollection(write_entry);
+    csr_reg_field_ops(access_type, offs, rv, bitpos, field_rd, field_const, write_field, ident, name, desc);
+    
+    return regToReadOnly(r);
 endmodule
 
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_rw#(Integer offs, t rv, Integer bitpos, String ident, String fname, String desc)(Reg#(t))
@@ -775,21 +759,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_wc#(Integer offs, t rv, Integer bitpos, S
     return r;
 endmodule
 
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_wo#(Integer offs, t rv, Integer bitpos, String ident, String name, String desc)()
-    provisos(
-        Bits#(t, sz_t),
-        FieldReadPure#(t, dw),
-        Add#(sz_t, a__, dw),
-        Mul#(TDiv#(dw, 8), 8, dw),
-        Div#(dw, 8, TDiv#(dw, 8))
-    );
-    Reg#(t) _r <- csr_reg_wo_reg(offs, rv, bitpos, ident, name, desc);
-endmodule
-
-// Write-only fields historically returned Empty, which made their backing
-// value inaccessible to user logic.  Keep that API and offer an additive
-// variant for hardware that needs to consume the written value.
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_wo_reg#(Integer offs, t rv, Integer bitpos, String ident, String name, String desc)(Reg#(t))
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_wo#(Integer offs, t rv, Integer bitpos, String ident, String name, String desc)(ReadOnly#(t))
     provisos(
         Bits#(t, sz_t),
         FieldReadPure#(t, dw),
@@ -798,22 +768,10 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_wo_reg#(Integer offs, t rv, Integer bitpo
         Div#(dw, 8, TDiv#(dw, 8))
     );
     Reg#(t) r <- csr_reg_field(CSR_WO, offs, rv, bitpos, ident, name, desc);
-    return r;
+    return regToReadOnly(r);
 endmodule
 
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c#(Integer offs, t rv, Integer bitpos, String ident, String fname, String desc)(Reg#(t))
-    provisos(
-        Bits#(t, sz_t),
-        FieldReadPure#(t, dw),
-        Add#(sz_t, a__, dw),
-        Mul#(TDiv#(dw, 8), 8, dw),
-        Div#(dw, 8, TDiv#(dw, 8))
-    );
-    let r <- csr_reg_field(CSR_W1C, offs, rv, bitpos, ident, fname, desc);
-    return r;
-endmodule
-
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c_evt_reg#(Integer offs, Bool rv, Bool evt, Integer bitpos, String ident, String fname, String desc)(Reg#(Bool))
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c#(Integer offs, Bool rv, Bool evt, Integer bitpos, String ident, String fname, String desc)(ReadOnly#(Bool))
     provisos(
         Add#(1, a__, dw),
         Mul#(TDiv#(dw, 8), 8, dw),
@@ -859,16 +817,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c_evt_reg#(Integer offs, Bool rv, Bool 
     addToCollection(read_entry);
     addToCollection(field_entry);
 
-    return r;
-endmodule
-
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c_evt#(Integer offs, Bool rv, Bool evt, Integer bitpos, String ident, String fname, String desc)()
-    provisos(
-        Add#(1, a__, dw),
-        Mul#(TDiv#(dw, 8), 8, dw),
-        Div#(dw, 8, TDiv#(dw, 8))
-    );
-    Reg#(Bool) _r <- csr_reg_w1c_evt_reg(offs, rv, evt, bitpos, ident, fname, desc);
+    return regToReadOnly(r);
 endmodule
 
 // Add one event-latched interrupt field. Software clears PENDING with W1C and
@@ -880,7 +829,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_irq#(Integer pending_offs, Integer enable_off
         Mul#(TDiv#(dw, 8), 8, dw),
         Div#(dw, 8, TDiv#(dw, 8))
     );
-    Reg#(Bool) rg_pending <- csr_reg_w1c_evt_reg(
+    let rg_pending <- csr_reg_w1c(
         pending_offs,
         False,
         event_strobe,
@@ -889,7 +838,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_irq#(Integer pending_offs, Integer enable_off
         name,
         desc
     );
-    Reg#(Bool) rg_enabled <- csr_reg_rw(
+    let rg_enabled <- csr_reg_rw(
         enable_offs,
         False,
         bitpos,

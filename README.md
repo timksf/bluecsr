@@ -39,28 +39,22 @@ different result should add an explicit handler for that access.
 
 Field definitions:
 - `csr_reg_field` generic field constructor for any `BlueCSRAccess_t` mode.
-- `csr_reg_hw` creates readable, hardware-owned field storage and metadata;
-  register-level action handlers control software writes.
-- `csr_reg_field_def` adds field metadata without storage or an access operation.
+- `csr_reg_hu` creates a hardware-updatable field whose readable state remains
+  owned by BlueCSR. Software writes use ordinary field semantics, while a
+  same-cycle hardware `update` takes priority.
 - `csr_reg_rw` creates a read-write field backed by a register.
 - `csr_reg_ro` creates a read-only field backed by a register.
 - `csr_reg_rc` creates a read-constant field with a fixed value.
 - `csr_reg_wo` creates a write-only field.
-- `csr_reg_wo_reg` creates a write-only field and returns its backing register for hardware consumption.
 - `csr_reg_ws` creates a write-set field.
 - `csr_reg_wc` creates a write-clear field.
-- `csr_reg_w1c` creates a write-1-to-clear field.
-- `csr_reg_w1c_evt` creates a single-bit write-1-to-clear field with a Boolean hardware event input that takes priority over software clearing.
+- `csr_reg_w1c` creates a single-bit write-1-to-clear field with a Boolean hardware event input that takes priority over software clearing.
 - `csr_reg_w1c_evt_reg` is the same event field and returns its pending-state register for hardware use.
 - `csr_irq` creates an event-latched W1C pending field and its RW enable field, then contributes `pending && enable` to a selected external IRQ line. Multiple fields may OR onto one line, and one map may drive multiple lines.
 - `csr_reg_w1s` creates a write-1-to-set field.
 - `csr_reg_fifo_ro` creates an exclusive, LSB-aligned FIFO read that returns `CSR_SLVERR` when empty. FIFO widths must be byte multiples no wider than the CSR data width.
 - `csr_reg_fifo_ro_valid` creates a non-failing FIFO read with byte-multiple data at the least-significant bits and a valid bit immediately above it. The FIFO element width plus one must fit in the CSR data width.
 - `csr_reg_fifo_wo` creates an exclusive, LSB-aligned FIFO write that accepts exactly the byte strobes occupied by the FIFO field and returns `CSR_SLVERR` when full. FIFO widths must be byte multiples no wider than the CSR data width.
-- `csr_reg_action_write` adds one exclusive, side-effecting write handler at a
-  register offset.
-- `csr_reg_read_value` contributes a fixed read value without adding field metadata.
-- `csr_reg_write_noop` makes writes to a mapped register succeed without an effect.
 
 Region accessors:
 - `csr_region_ro` creates a read-only region backed by a read function.

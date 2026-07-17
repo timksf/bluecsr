@@ -22,10 +22,9 @@ ARGSC ?= -u -show-schedule
 #-no-warn-action-shadowing
 ARGSCV ?= -show-schedule -remove-dollar
 
-BLUELIB_DIR=
 BLUEAXI_DIR=
-BLUEIMPORT=$(BLUELIB_DIR):$(BLUEAXI_DIR):+
-SOURCE_DIRS := . $(foreach dir,$(BLUELIB_DIR) $(BLUEAXI_DIR),$(if $(strip $(dir)),$(dir)))
+BLUEIMPORT=$(BLUEAXI_DIR):+
+SOURCE_DIRS := . $(foreach dir,$(BLUEAXI_DIR),$(if $(strip $(dir)),$(dir)))
 BSV_SRCS := $(sort $(foreach dir,$(SOURCE_DIRS),$(wildcard $(dir)/*.bsv)))
 
 all: $(EXE)
