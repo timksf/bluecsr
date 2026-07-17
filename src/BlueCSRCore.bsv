@@ -621,6 +621,101 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_field#(BlueCSRAccess_t access_type, Integ
     return r;
 endmodule
 
+// Hardware-owned fields are readable through BlueCSR, while writes are
+// handled by a register-level action handler.  access_type is metadata for
+// export and does not create an ordinary software write operation.
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_hw#(BlueCSRAccess_t access_type, Integer offs, t rv, Integer bitpos, String ident, String name, String desc)(Reg#(t))
+    provisos(
+        Bits#(t, sz_t),
+        FieldReadPure#(t, dw),
+        Add#(sz_t, a__, dw)
+    );
+    Reg#(t) r <- mkReg(rv);
+
+    if(bitpos < 0 || (bitpos + valueOf(sz_t)) > valueOf(dw)) begin
+        errorM("BlueCSR field " + ident + " lies outside its register word.");
+    end
+
+    String reset_value = "0x" + integerToHex(bit_to_integer(pack(rv)));
+    RegMapEntry_t#(aw, dw) read_entry = tagged ReadOpPure ReadOpPure_t {
+        offs: offs,
+        f_read: field_read_pure(r, bitpos)
+    };
+    RegMapEntry_t#(aw, dw) field_entry = tagged RegFieldDef RegFieldDef_t {
+        offset: offs,
+        identifier: ident,
+        name: name,
+        description: desc,
+        access_type: access_type,
+        bit_offset: bitpos,
+        width: valueOf(sz_t),
+        reset_value: reset_value
+    };
+
+    addToCollection(read_entry);
+    addToCollection(field_entry);
+    return r;
+endmodule
+
+// Add field metadata without creating storage or an access operation.
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_field_def#(BlueCSRAccess_t access_type, Integer offs, t rv, Integer bitpos, String ident, String name, String desc)()
+    provisos(Bits#(t, sz_t));
+
+    if(bitpos < 0 || (bitpos + valueOf(sz_t)) > valueOf(dw)) begin
+        errorM("BlueCSR field " + ident + " lies outside its register word.");
+    end
+
+    RegMapEntry_t#(aw, dw) field_entry = tagged RegFieldDef RegFieldDef_t {
+        offset: offs,
+        identifier: ident,
+        name: name,
+        description: desc,
+        access_type: access_type,
+        bit_offset: bitpos,
+        width: valueOf(sz_t),
+        reset_value: "0x" + integerToHex(bit_to_integer(pack(rv)))
+    };
+    addToCollection(field_entry);
+endmodule
+
+// Add one exclusive, side-effecting register write operation.  This can be
+// combined with hardware-owned fields at the same offset.
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_action_write#(
+    Integer offs,
+    function Bool can_write(Bit#(dw) data, Bit#(TDiv#(dw, 8)) strobe),
+    BlueCSRResponse_t unavailable_response,
+    function ActionValue#(BlueCSRResponse_t) write_fn(Bit#(dw) data, Bit#(TDiv#(dw, 8)) strobe)
+)();
+    RegMapEntry_t#(aw, dw) write_entry = tagged WriteOpAction WriteOpAction_t {
+        offs: offs,
+        exclusive: True,
+        can_write: can_write,
+        unavailable_resp: unavailable_response,
+        f_write: write_fn
+    };
+    addToCollection(write_entry);
+endmodule
+
+// Add a pure register read contribution without adding field metadata.
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_read_value#(Integer offs, Bit#(dw) value)();
+    function Bit#(dw) do_read() = value;
+    RegMapEntry_t#(aw, dw) read_entry = tagged ReadOpPure ReadOpPure_t {
+        offs: offs,
+        f_read: do_read
+    };
+    addToCollection(read_entry);
+endmodule
+
+// Add a successful register write operation that intentionally has no effect.
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_write_noop#(Integer offs)();
+    function Action do_write(Bit#(dw) data, Bit#(TDiv#(dw, 8)) strobe) = noAction;
+    RegMapEntry_t#(aw, dw) write_entry = tagged WriteOp WriteOp_t {
+        offs: offs,
+        f_write: do_write
+    };
+    addToCollection(write_entry);
+endmodule
+
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_rw#(Integer offs, t rv, Integer bitpos, String ident, String fname, String desc)(Reg#(t))
     provisos(
         Bits#(t, sz_t),
@@ -1084,7 +1179,11 @@ endinterface
 typedef BusAccess_ifc#(BlueCSR_Fab_ifc#(aw, dw), int_ifc)   BlueCSRAccess_Fab_ifc#(numeric type aw, numeric type dw, type int_ifc);
 typedef BusAccess_ifc#(BlueCSR_ifc#(aw, dw, ni), int_ifc)   BlueCSRAccess_ifc#(numeric type aw, numeric type dw, numeric type ni, type int_ifc);
 
-module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, Bool buffer_in)(BlueCSRAccess_ifc#(aw, dw, ni, i));
+module [Module] create_blue_csr_with_default_response#(
+    BlueCSRCtx_t#(aw, dw, i) ctx,
+    Bool buffer_in,
+    BlueCSRResponse_t default_response
+)(BlueCSRAccess_ifc#(aw, dw, ni, i));
 
     let {coll_device_ifc, c} <- getCollection(ctx);
 
@@ -1348,7 +1447,7 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, Bool buffer_in)(B
                 f_rsp.enq(
                     BlueCSR_Rsp_t {
                         rdata:  0,
-                        resp:   CSR_DECERR
+                        resp:   default_response
                     }
                 );
                 f_req.deq;
@@ -1362,7 +1461,7 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, Bool buffer_in)(B
                 f_rsp.enq(
                     BlueCSR_Rsp_t {
                         rdata:  0,
-                        resp:   CSR_DECERR
+                        resp:   default_response
                     }
                 );
                 f_req.deq;
@@ -1392,6 +1491,11 @@ module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, Bool buffer_in)(B
     endinterface
 
     interface internal = coll_device_ifc;
+endmodule
+
+module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, Bool buffer_in)(BlueCSRAccess_ifc#(aw, dw, ni, i));
+    let csr <- create_blue_csr_with_default_response(ctx, buffer_in, CSR_DECERR);
+    return csr;
 endmodule
 
 endpackage

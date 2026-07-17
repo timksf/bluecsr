@@ -18,9 +18,16 @@ fallible accesses, such as FIFO dequeue/enqueue, use a separate scheduled
 for correct Bluespec scheduling; normal users should use the field, FIFO, and
 region constructors below rather than creating operation entries directly.
 
-Requests in a direction unsupported by a register or region return
-`CSR_DECERR`. A side-effecting handler can return a more specific response such
-as `CSR_SLVERR` when a mapped operation is temporarily unavailable.
+With `create_blue_csr`, requests in a direction unsupported by a register or
+region return `CSR_DECERR`. A side-effecting handler can return a more specific
+response such as `CSR_SLVERR` when a mapped operation is temporarily
+unavailable.
+
+`create_blue_csr` returns `CSR_DECERR` whenever no more-specific access rule
+can fire. `create_blue_csr_with_default_response` can select a different
+fallback response. The configured response also applies to a mapped
+entry when its direction or policy has no applicable rule. Maps that need a
+different result should add an explicit handler for that access.
 
 #### Bluespec API
 - `BlueCSRCtx_t` collection context used to build a CSR map and return internal module state.
@@ -32,6 +39,9 @@ as `CSR_SLVERR` when a mapped operation is temporarily unavailable.
 
 Field definitions:
 - `csr_reg_field` generic field constructor for any `BlueCSRAccess_t` mode.
+- `csr_reg_hw` creates readable, hardware-owned field storage and metadata;
+  register-level action handlers control software writes.
+- `csr_reg_field_def` adds field metadata without storage or an access operation.
 - `csr_reg_rw` creates a read-write field backed by a register.
 - `csr_reg_ro` creates a read-only field backed by a register.
 - `csr_reg_rc` creates a read-constant field with a fixed value.
@@ -47,6 +57,10 @@ Field definitions:
 - `csr_reg_fifo_ro` creates an exclusive, LSB-aligned FIFO read that returns `CSR_SLVERR` when empty. FIFO widths must be byte multiples no wider than the CSR data width.
 - `csr_reg_fifo_ro_valid` creates a non-failing FIFO read with byte-multiple data at the least-significant bits and a valid bit immediately above it. The FIFO element width plus one must fit in the CSR data width.
 - `csr_reg_fifo_wo` creates an exclusive, LSB-aligned FIFO write that accepts exactly the byte strobes occupied by the FIFO field and returns `CSR_SLVERR` when full. FIFO widths must be byte multiples no wider than the CSR data width.
+- `csr_reg_action_write` adds one exclusive, side-effecting write handler at a
+  register offset.
+- `csr_reg_read_value` contributes a fixed read value without adding field metadata.
+- `csr_reg_write_noop` makes writes to a mapped register succeed without an effect.
 
 Region accessors:
 - `csr_region_ro` creates a read-only region backed by a read function.
@@ -61,6 +75,9 @@ Trigger fields:
 
 Runtime and export:
 - `create_blue_csr` builds the live BlueCSR interface from a `BlueCSRCtx_t` definition. Its inferred `ni` parameter configures the external IRQ vector width.
+- `create_blue_csr_with_default_response` builds the same interface and lets
+  the caller choose the response when no more-specific access rule can fire.
+  The legacy constructor remains equivalent to selecting `CSR_DECERR`.
 - `doc_blue_csr` renders a human-readable register map summary.
 - `doc_blue_csr_markdown` renders the register map as a Markdown table.
 - `export_systemrdl_blue_csr` writes the register map out as SystemRDL.
