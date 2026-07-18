@@ -655,8 +655,8 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_field#(BlueCSRAccess_t access_type, Integ
     return r;
 endmodule
 
-//hardware-updatable fields keep their state private to BlueCSR. If HW updates in same cycle as SW updates, HW wins
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_hu#(BlueCSRAccess_t access_type, Integer offs, t rv, Integer bitpos, Bool hw_upd, t hw_upd_val, String ident, String name, String desc)(ReadOnly#(t))
+// Shared implementation for fields whose state remains owned by BlueCSR.
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_update#(BlueCSRAccess_t access_type, Integer offs, t rv, Integer bitpos, Maybe#(t) hw_update, String ident, String name, String desc)(ReadOnly#(t))
     provisos(
         Bits#(t, sz_t),
         FieldReadPure#(t, dw),
@@ -665,14 +665,14 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_hu#(BlueCSRAccess_t access_type, Integer 
         Div#(dw, 8, TDiv#(dw, 8))
     );
     Reg#(t) r <- mkReg(rv);
-    Wire#(Maybe#(t)) w_hardware_update <- mkDWire(tagged Invalid);
+    Wire#(Maybe#(t)) w_hardware_upd <- mkDWire(tagged Invalid);
     Wire#(Maybe#(CSRRegWrite_t#(dw))) w_software_write <- mkDWire(tagged Invalid);
 
     function Bit#(dw) field_rd() = field_read_pure(r, bitpos);
     function Bit#(dw) field_const() = field_read_pure(rv, bitpos);
     function Action write_field(BlueCSRAccess_t write_access, Bit#(dw) d, Bit#(TDiv#(dw, 8)) s);
         action
-            if(!isValid(w_hardware_update)) begin
+            if(w_hardware_upd matches tagged Invalid) begin
                 w_software_write <= tagged Valid CSRRegWrite_t {
                     data: d,
                     strobe: s
@@ -681,13 +681,13 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_hu#(BlueCSRAccess_t access_type, Integer 
         endaction
     endfunction
 
-    rule r_hw_upd if(hw_upd);
-        w_hardware_update <= tagged Valid hw_upd_val;
+    rule r_hw_upd if(hw_update matches tagged Valid .new_value);
+        w_hardware_upd <= tagged Valid new_value;
     endrule
 
     //shared update rule to arbitrate HW and SW updates
     rule r_apply_update;
-        if(w_hardware_update matches tagged Valid .new_value) begin
+        if(w_hardware_upd matches tagged Valid .new_value) begin
             r <= new_value;
         end
         else if(w_software_write matches tagged Valid .write) begin
@@ -698,6 +698,33 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_hu#(BlueCSRAccess_t access_type, Integer 
     csr_reg_field_ops(access_type, offs, rv, bitpos, field_rd, field_const, write_field, ident, name, desc);
     
     return regToReadOnly(r);
+endmodule
+
+// Read-write fields whose state may be updated by hardware.  A same-cycle
+// hardware update wins over a software write.
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_hu#(Integer offs, t rv, Integer bitpos, Maybe#(t) hw_update, String ident, String name, String desc)(ReadOnly#(t))
+    provisos(
+        Bits#(t, sz_t),
+        FieldReadPure#(t, dw),
+        Add#(sz_t, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    let r <- csr_reg_update(CSR_RW, offs, rv, bitpos, hw_update, ident, name, desc);
+    return r;
+endmodule
+
+// Read-only fields whose state may be updated by hardware.
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_ho#(Integer offs, t rv, Integer bitpos, Maybe#(t) hw_update, String ident, String name, String desc)(ReadOnly#(t))
+    provisos(
+        Bits#(t, sz_t),
+        FieldReadPure#(t, dw),
+        Add#(sz_t, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    let r <- csr_reg_update(CSR_RO, offs, rv, bitpos, hw_update, ident, name, desc);
+    return r;
 endmodule
 
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_rw#(Integer offs, t rv, Integer bitpos, String ident, String fname, String desc)(Reg#(t))
@@ -771,53 +798,16 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_wo#(Integer offs, t rv, Integer bitpos, S
     return regToReadOnly(r);
 endmodule
 
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c#(Integer offs, Bool rv, Bool evt, Integer bitpos, String ident, String fname, String desc)(ReadOnly#(Bool))
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c#(Integer offs, t rv, Integer bitpos, Maybe#(t) hw_update, String ident, String fname, String desc)(ReadOnly#(t))
     provisos(
-        Add#(1, a__, dw),
+        Bits#(t, sz_t),
+        FieldReadPure#(t, dw),
+        Add#(sz_t, a__, dw),
         Mul#(TDiv#(dw, 8), 8, dw),
         Div#(dw, 8, TDiv#(dw, 8))
     );
-    Reg#(Bool) r <- mkReg(rv);
-    Wire#(Bool) w_clear <- mkDWire(False);
-
-    String reset_value = "0x" + integerToHex(bit_to_integer(pack(rv)));
-
-    rule r_update_pending;
-        r <= (r && !w_clear) || evt;
-    endrule
-
-    function Bit#(dw) do_read() = field_read_pure(r, bitpos);
-
-    function Action do_write(Bit#(dw) d, Bit#(TDiv#(dw, 8)) s);
-        action
-            w_clear <= unpack(d[bitpos] & s[bitpos / 8]);
-        endaction
-    endfunction
-
-    RegMapEntry_t#(aw, dw) read_entry = tagged ReadOpPure ReadOpPure_t {
-        offs: offs,
-        f_read: do_read
-    };
-    RegMapEntry_t#(aw, dw) write_entry = tagged WriteOp WriteOp_t {
-        offs: offs,
-        f_write: do_write
-    };
-    RegMapEntry_t#(aw, dw) field_entry = tagged RegFieldDef RegFieldDef_t {
-        offset: offs,
-        identifier: ident,
-        name: fname,
-        description: desc,
-        access_type: CSR_W1C,
-        bit_offset: bitpos,
-        width: 1,
-        reset_value: reset_value
-    };
-
-    addToCollection(write_entry);
-    addToCollection(read_entry);
-    addToCollection(field_entry);
-
-    return regToReadOnly(r);
+    let r <- csr_reg_update(CSR_W1C, offs, rv, bitpos, hw_update, ident, fname, desc);
+    return r;
 endmodule
 
 // Add one event-latched interrupt field. Software clears PENDING with W1C and
@@ -832,8 +822,8 @@ module [BlueCSRCtx_t#(aw, dw)] csr_irq#(Integer pending_offs, Integer enable_off
     let rg_pending <- csr_reg_w1c(
         pending_offs,
         False,
-        event_strobe,
         bitpos,
+        (event_strobe ? tagged Valid True : tagged Invalid),
         ident,
         name,
         desc

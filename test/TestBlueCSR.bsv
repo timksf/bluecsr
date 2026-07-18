@@ -47,13 +47,12 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
 
     Reg#(Bit#(1))   rg_sts_rstrb;
     Reg#(Bit#(1))   rg_sts_rstrb2;
-    Wire#(Bool)     w_sts_rxerr_evt <- mkDWire(False);
-    Wire#(Bool)     w_sts_evt       <- mkDWire(False);
+    Wire#(Maybe#(Bool)) w_sts_rxerr_evt <- mkDWire(tagged Invalid);
+    Wire#(Maybe#(Bool)) w_sts_evt       <- mkDWire(tagged Invalid);
     Wire#(Bool)     w_irq_rx_evt    <- mkDWire(False);
     Wire#(Bool)     w_irq_tx_evt    <- mkDWire(False);
     Wire#(Bool)     w_irq_fault_evt <- mkDWire(False);
-    Wire#(Bool)     w_hu_update     <- mkDWire(False);
-    Wire#(Bit#(32)) w_hu_value      <- mkDWire(0);
+    Wire#(Maybe#(Bit#(32))) w_hu_update <- mkDWire(tagged Invalid);
 
     RegFile#(Bit#(8), Bit#(8)) table0 <- mkRegFileFull;
     FIFOF#(Bit#(8)) fifo_error_read <- mkSizedFIFOF(1);
@@ -77,8 +76,8 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
 
     csr_reg_def('h08, "STS", "Module status register");
     rg_sts_run      <- csr_reg_ro ('h08, False,                  0, "RUNN",  "Status Running",          "Indicates IP active status.");
-    let _rxerr      <- csr_reg_w1c('h08, False, w_sts_rxerr_evt, 4, "RXERR", "Status Receive Error",    "Indicates Reception Error.");
-    let _stsev      <- csr_reg_w1c('h08, False, w_sts_evt,       8, "EVENT", "Event Status",            "Indicates a sticky hardware event.");
+    let _rxerr      <- csr_reg_w1c('h08, False, 4, w_sts_rxerr_evt, "RXERR", "Status Receive Error", "Indicates Reception Error.");
+    let _stsev      <- csr_reg_w1c('h08, False, 8, w_sts_evt,       "EVENT", "Event Status",          "Indicates a sticky hardware event.");
     rg_sts_rstrb    <- csr_reg_trigr('h08, False,                   "STSRD", "Status Rd Access Strobe", "Indicates a bus read access to this register.");
     rg_sts_rstrb2   <- csr_reg_trigr('h08, False,                   "STSR2", "Status Rd Access Strobe", "Checks multiple triggers at one offset.");
 
@@ -109,12 +108,10 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
 
     csr_reg_def('h20, "HU", "Hardware-updatable register");
     ReadOnly#(Bit#(32)) rg_hu <- csr_reg_hu(
-        CSR_RW,
         'h20,
         'h12345678,
         0,
         w_hu_update,
-        w_hu_value,
         "VALUE",
         "Value",
         "Software-writable value with a hardware update input."
@@ -132,15 +129,26 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
     method sts_rstrb2   = rg_sts_rstrb2;
 
     method running              = rg_sts_run._write;
-    method rxerr                = w_sts_rxerr_evt._write;
-    method sts_event            = w_sts_evt._write;
+    method Action rxerr(Bool b);
+        action
+            if (b) begin
+                w_sts_rxerr_evt <= tagged Valid True;
+            end
+        endaction
+    endmethod
+    method Action sts_event(Bool b);
+        action
+            if (b) begin
+                w_sts_evt <= tagged Valid True;
+            end
+        endaction
+    endmethod
     method irq_rx_event         = w_irq_rx_evt._write;
     method irq_tx_event         = w_irq_tx_evt._write;
     method irq_fault_event      = w_irq_fault_evt._write;
     method Action hu_update(Bit#(32) value);
         action
-            w_hu_update <= True;
-            w_hu_value <= value;
+            w_hu_update <= tagged Valid value;
         endaction
     endmethod
     method fifo_error_enq       = fifo_error_read.enq;
