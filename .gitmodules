@@ -1,0 +1,3 @@
+[submodule "bluefabric"]
+	path = dep/bluefabric
+	url = https://github.com/timksf/bluefabric.git

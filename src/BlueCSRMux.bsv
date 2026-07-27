@@ -18,10 +18,7 @@ typedef struct {
 // If windows overlap, the lowest vector index has priority. Requests and
 // responses are routed directly. The response FIFO is fall-through: it stores
 // a response only when the upstream consumer applies backpressure.
-module mkBlueCSRMux#(
-    Vector#(n, BlueCSRSubmap_t#(aw)) submaps,
-    Vector#(n, BlueCSR_ifc#(aw, dw)) children
-)(BlueCSR_ifc#(aw, dw))
+module mkBlueCSRMux#(Vector#(n, BlueCSRSubmap_t#(aw)) submaps, Vector#(n, BlueCSR_ifc#(aw, dw, ni)) children)(BlueCSR_ifc#(aw, dw, ni))
     provisos(Add#(1, n_minus_one, n));
 
     FIFOF#(BlueCSR_Rsp_t#(dw)) responses <- mkBypassFIFOF;
@@ -45,13 +42,13 @@ module mkBlueCSRMux#(
     addRules(response_rules);
 
     interface Put request;
-        method Action put(BlueCSR_Req_t#(aw, dw) req) if (!pending[0] && responses.notFull);
+        method Action put(BlueCSR_Req_t#(aw, dw) req) if(!pending[0] && responses.notFull);
             action
                 Bool mapped = False;
                 Bool earlier_hit = False;
                 for (Integer i = 0; i < valueOf(n); i = i + 1) begin
                     Bool hit = submap_hit(req, i);
-                    if (hit && !earlier_hit) begin
+                    if(hit && !earlier_hit) begin
                         let window = submaps[i];
                         let local_req = req;
                         local_req.addr = req.addr - window.base;
@@ -60,7 +57,7 @@ module mkBlueCSRMux#(
                     end
                     earlier_hit = earlier_hit || hit;
                 end
-                if (mapped) begin
+                if(mapped) begin
                     pending[0] <= True;
                 end
                 else begin
@@ -71,6 +68,16 @@ module mkBlueCSRMux#(
     endinterface
 
     interface response = toGet(responses);
+
+    method Vector#(ni, Bool) irqs;
+        Vector#(ni, Bool) result = replicate(False);
+        for (Integer i = 0; i < valueOf(n); i = i + 1) begin
+            for (Integer j = 0; j < valueOf(ni); j = j + 1) begin
+                result[j] = result[j] || children[i].irqs[j];
+            end
+        end
+        return result;
+    endmethod
 endmodule
 
 endpackage

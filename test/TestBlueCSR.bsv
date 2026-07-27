@@ -349,7 +349,7 @@ module [Module] mkTestBlueCSR(Empty);
         cfg.internal.irq_rx_event(True);
         delay(1);
         action
-            if(cfg.external.irqs.lines[0] || cfg.external.irqs.lines[1]) begin
+            if(cfg.external.irqs[0] || cfg.external.irqs[1]) begin
                 $display("Masked interrupt unexpectedly asserted an IRQ line");
                 $finish(1);
             end
@@ -365,7 +365,7 @@ module [Module] mkTestBlueCSR(Empty);
         endpar
         delay(1);
         action
-            if(!cfg.external.irqs.lines[0] || !cfg.external.irqs.lines[1]) begin
+            if(!cfg.external.irqs[0] || !cfg.external.irqs[1]) begin
                 $display("Enabled pending interrupts did not assert both IRQ lines");
                 $finish(1);
             end
@@ -375,7 +375,7 @@ module [Module] mkTestBlueCSR(Empty);
         expect_write(CSR_OKAY);
         delay(1);
         action
-            if(!cfg.external.irqs.lines[0] || !cfg.external.irqs.lines[1]) begin
+            if(!cfg.external.irqs[0] || !cfg.external.irqs[1]) begin
                 $display("Clearing RX incorrectly removed TX from the shared IRQ line");
                 $finish(1);
             end
@@ -385,7 +385,7 @@ module [Module] mkTestBlueCSR(Empty);
         expect_write(CSR_OKAY);
         delay(1);
         action
-            if(cfg.external.irqs.lines[0] || !cfg.external.irqs.lines[1]) begin
+            if(cfg.external.irqs[0] || !cfg.external.irqs[1]) begin
                 $display("Shared IRQ line did not deassert after its last pending source cleared");
                 $finish(1);
             end
@@ -395,7 +395,7 @@ module [Module] mkTestBlueCSR(Empty);
         expect_write(CSR_OKAY);
         delay(1);
         action
-            if(cfg.external.irqs.lines[0] || cfg.external.irqs.lines[1]) begin
+            if(cfg.external.irqs[0] || cfg.external.irqs[1]) begin
                 $display("IRQ vector did not clear after all pending fields cleared");
                 $finish(1);
             end

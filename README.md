@@ -6,8 +6,8 @@ metadata as readable documentation or SystemRDL.
 
 `csr_irq` turns an event strobe into a sticky W1C pending field and combines it
 with an RW enable field. `create_blue_csr` ORs each enabled pending source onto
-its selected `IRQLines_ifc` output, so multiple fields may safely share a line
-and one CSR block may expose multiple lines.
+its selected interrupt-vector output, so multiple fields may safely share a
+line and one CSR block may expose multiple lines.
 
 #### Access execution model
 
@@ -84,8 +84,7 @@ Runtime and export:
 - `export_systemrdl_blue_csr` writes the register map out as SystemRDL.
 
 Interfaces and types:
-- `IRQLines_ifc#(n)` is the shared vector subinterface whose `lines` method returns `Vector#(n, Bool)`.
-- `BlueCSR_ifc#(aw, dw, ni)` contains request and response interfaces plus `IRQLines_ifc#(ni) irqs`.
+- `BlueCSR_ifc#(aw, dw, ni)` contains request and response interfaces plus an `irqs` method returning `Vector#(ni, Bool)`.
 - `BlueCSRAccess_ifc` bundle containing the external CSR interface and the internal user interface.
 - `BlueCSR_Req_t` request payload type.
 - `BlueCSR_Rsp_t` response payload type.
@@ -96,4 +95,8 @@ Interfaces and types:
 
 AXI4-Lite adapter API:
 - `mkBlueCSRAXI4LiteAdapter` bridges a `BlueCSR_ifc` instance to AXI4-Lite slave read and write channels.
-- `BlueCSR_AXI4Lite_ifc#(aw, dw, ni)` contains the AXI4-Lite read/write slave interfaces and forwards the same `irqs` vector subinterface.
+- `BlueCSR_AXI4Lite_ifc#(aw, dw, ni)` contains the AXI4-Lite read/write slave interfaces and forwards the same interrupt vector.
+
+APB adapter API:
+- `mkBlueCSRAPBAdapter` bridges a `BlueCSR_ifc` instance to a BlueFabric APB slave interface.
+- `BlueCSR_APB_ifc#(aw, dw, user_w, ni)` contains the APB slave interface and forwards the CSR interrupt vector upstream.
