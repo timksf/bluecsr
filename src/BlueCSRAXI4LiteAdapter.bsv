@@ -1,6 +1,7 @@
 package BlueCSRAXI4LiteAdapter;
 
 import GetPut :: *;
+import Vector :: *;
 
 import BlueAXI :: *;
 import BlueCSRCore :: *;
@@ -8,7 +9,8 @@ import BlueCSRCore :: *;
 interface BlueCSR_AXI4Lite_ifc#(numeric type aw, numeric type dw, numeric type ni);
     interface AXI4_Lite_Slave_Rd_Fab#(aw, dw) s_rd;
     interface AXI4_Lite_Slave_Wr_Fab#(aw, dw) s_wr;
-    interface IRQLines_ifc#(ni) irqs;
+    (* always_ready *)
+    method Vector#(ni, Bool) irqs;
 endinterface
 
 function BlueCSRProt_t axi_lite_to_bluecsr_prot(AXI4_Lite_Prot prot);
@@ -89,7 +91,7 @@ module mkBlueCSRAXI4LiteAdapter#(BlueCSR_ifc#(aw, dw, ni) csr, Integer axi4_rd_b
 
     interface s_rd = axi4l_rd.fab;
     interface s_wr = axi4l_wr.fab;
-    interface irqs = csr.irqs;
+    method irqs = csr.irqs;
 endmodule
 
 endpackage

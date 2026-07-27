@@ -62,10 +62,6 @@ typedef struct {
     Bit#(TDiv#(dw, 8)) strobe;
 } CSRRegWrite_t#(numeric type dw) deriving(Bits);
 
-interface IRQLines_ifc#(numeric type n);
-    method Vector#(n, Bool) lines;
-endinterface
-
 (*always_enabled*)
 interface BlueCSR_Fab_ifc#(numeric type aw, numeric type dw);
     (*prefix = ""*) method Action valid ((*port = "i_valid"*)   Bit#(1)             valid   );
@@ -84,7 +80,8 @@ interface BlueCSR_ifc#(numeric type aw, numeric type dw, numeric type ni);
     //no pure server to allow easy expansion of this interface
     interface Put#(BlueCSR_Req_t#(aw, dw))  request;
     interface Get#(BlueCSR_Rsp_t#(dw))      response;
-    interface IRQLines_ifc#(ni)             irqs;
+    (* always_ready *)
+    method Vector#(ni, Bool) irqs;
 endinterface
 
 typedef ModuleCollect#(RegMapEntry_t#(aw, dw), ifc) BlueCSRCtx_t#(numeric type aw, numeric type dw, type ifc);
@@ -1415,18 +1412,16 @@ module [Module] create_blue_csr_with_default_response#(
         interface request  = toPut(f_req);
         interface response = toGet(f_rsp);
 
-        interface IRQLines_ifc irqs;
-            method Vector#(ni, Bool) lines;
-                Vector#(ni, Bool) result = replicate(False);
-                for (Integer i = 0; i < List::length(irq_sources); i = i + 1) begin
-                    let irq = irq_sources[i];
-                    if(irq.line >= 0 && irq.line < valueOf(ni)) begin
-                        result[irq.line] = result[irq.line] || irq.active;
-                    end
+        method Vector#(ni, Bool) irqs;
+            Vector#(ni, Bool) result = replicate(False);
+            for (Integer i = 0; i < List::length(irq_sources); i = i + 1) begin
+                let irq = irq_sources[i];
+                if(irq.line >= 0 && irq.line < valueOf(ni)) begin
+                    result[irq.line] = result[irq.line] || irq.active;
                 end
-                return result;
-            endmethod
-        endinterface
+            end
+            return result;
+        endmethod
     endinterface
 
     interface internal = coll_device_ifc;
