@@ -63,7 +63,7 @@ module [Module] mkTestAXIAdapter(Empty);
         axi4_lite_write(m_wr, 'h1C, 1);
         action
             let r <- axi4_lite_write_response(m_wr);
-            if(r != OKAY || !axi_cfg.irqs.lines[0]) begin
+            if(r != OKAY || !axi_cfg.irqs[0]) begin
                 $display("AXI adapter did not expose the BlueCSR IRQ vector");
                 $finish(1);
             end
@@ -72,7 +72,7 @@ module [Module] mkTestAXIAdapter(Empty);
         axi4_lite_write(m_wr, 'h18, 1);
         action
             let r <- axi4_lite_write_response(m_wr);
-            if(r != OKAY || axi_cfg.irqs.lines[0]) begin
+            if(r != OKAY || axi_cfg.irqs[0]) begin
                 $display("AXI adapter IRQ vector did not follow pending W1C");
                 $finish(1);
             end

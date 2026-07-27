@@ -5,6 +5,7 @@ import ModuleContext :: *;
 import Vector :: *;
 import BuildVector :: *;
 
+import AddrMapDecoder :: *;
 import BlueAddrMap :: *;
 import BlueInterruptMap :: *;
 import BlueCSRCore :: *;
@@ -100,17 +101,14 @@ module [AddrMapCtx_t#(32, TestAhbTarget_ifc)] soc_address_map(TestSocFabric_ifc)
 endmodule
 
 interface TestIRQSource_ifc#(numeric type n);
-    interface IRQLines_ifc#(n) irqs;
+    method Vector#(n, Bool) irqs;
     method Action set_irqs(Bit#(n) value);
 endinterface
 
 module mkTestIRQSource(TestIRQSource_ifc#(n));
     Reg#(Bit#(n)) rg_irqs <- mkReg(0);
 
-    interface IRQLines_ifc irqs;
-        method Vector#(n, Bool) lines = unpack(rg_irqs);
-    endinterface
-
+    method Vector#(n, Bool) irqs = unpack(rg_irqs);
     method set_irqs = rg_irqs._write;
 endmodule
 
@@ -128,7 +126,7 @@ module [IRQMapCtx_t#(8)] soc_irq_map(TestInterruptSources_ifc);
     Reg#(Bool) rg_gpio_irq   <- mkReg(False);
     Reg#(Bool) rg_shared_irq <- mkReg(False);
 
-    irq_map_source(2, "UART0",      i_uart.irqs.lines);
+    irq_map_source(2, "UART0",      i_uart.irqs);
     irq_map_source(3, "SHARED_IRQ", vec(rg_shared_irq));
     irq_map_source(5, "GPIO0",      vec(rg_gpio_irq));
 
@@ -149,17 +147,20 @@ module mkTestBlueAddrMap(Empty);
             AddrMapDecoder_ifc#(32) decoder,
             Bit#(32) address,
             Bool expected_hit,
+            Bit#(32) expected_target_index,
             Bit#(32) expected_offset
         );
         action
-            let got = decoder.lookup(address);
+            let got = decoder.lookup(address, 1);
             if(got.hit != expected_hit
+                    || got.target_index != expected_target_index
                     || got.global_addr != address
                     || got.offset != expected_offset) begin
                 $display(
-                    "Address map mismatch at %08x: hit=%0d global=%08x offset=%08x",
+                    "Address map mismatch at %08x: hit=%0d target=%0d global=%08x offset=%08x",
                     address,
                     got.hit,
+                    got.target_index,
                     got.global_addr,
                     got.offset
                 );
@@ -171,17 +172,24 @@ module mkTestBlueAddrMap(Empty);
     function Action expect_span(
             Bit#(32) address,
             Bit#(32) bytes,
-            Bool expected_hit
+            Bool expected_hit,
+            Bit#(32) expected_target_index,
+            Bit#(32) expected_offset
         );
         action
-            let got = map.decoder.lookup_span(address, bytes);
-            if(got.hit != expected_hit || got.global_addr != address) begin
+            let got = map.decoder.lookup(address, bytes);
+            if(got.hit != expected_hit
+                    || got.target_index != expected_target_index
+                    || got.global_addr != address
+                    || got.offset != expected_offset) begin
                 $display(
-                    "Address span mismatch at %08x + %0d: hit=%0d global=%08x",
+                    "Address span mismatch at %08x + %0d: hit=%0d target=%0d global=%08x offset=%08x",
                     address,
                     bytes,
                     got.hit,
-                    got.global_addr
+                    got.target_index,
+                    got.global_addr,
+                    got.offset
                 );
                 $finish(1);
             end
@@ -189,9 +197,9 @@ module mkTestBlueAddrMap(Empty);
     endfunction
 
     Stmt test = seq
-        expect_hit(map.decoder, 'h8000_0010, True, 'h0000_0010);
-        expect_hit(map.decoder, 'h1001_0004, True, 'h0001_0004);
-        expect_hit(map.decoder, 'h2000_0000, False, 0);
+        expect_hit(map.decoder, 'h8000_0010, True, 0, 'h0000_0010);
+        expect_hit(map.decoder, 'h1001_0004, True, 1, 'h0001_0004);
+        expect_hit(map.decoder, 'h2000_0000, False, 0, 0);
 
         // The bridge forwards the global address. Its own APB map performs the
         // leaf decode and reports the peripheral-local offset separately.
@@ -199,17 +207,20 @@ module mkTestBlueAddrMap(Empty);
             map.internal.peripherals.downstream_decoder,
             'h1001_0004,
             True,
+            1,
             4
         );
         expect_hit(
             map.internal.peripherals.downstream_decoder,
             'h1003_0000,
             False,
+            0,
             0
         );
 
-        expect_span('h8000_FFFC, 4, True);
-        expect_span('h8000_FFFE, 4, False);
+        expect_span('h8000_FFFC, 4, True, 0, 'h0000_FFFC);
+        expect_span('h8000_FFFE, 4, False, 0, 0);
+        expect_span('h8000_0000, 0, False, 0, 0);
 
         action
             if(map.internal.memory.target_id != 0
@@ -227,10 +238,10 @@ module mkTestBlueAddrMap(Empty);
             interrupts.internal.set_shared_irq(False);
         endaction
         action
-            if(!interrupts.irqs.lines[2]
-                    || interrupts.irqs.lines[3]
-                    || interrupts.irqs.lines[5]
-                    || interrupts.irqs.lines[0]) begin
+            if(!interrupts.irqs[2]
+                    || interrupts.irqs[3]
+                    || interrupts.irqs[5]
+                    || interrupts.irqs[0]) begin
                 $display("Interrupt wire map routed the wrong sources");
                 $finish(1);
             end
@@ -242,9 +253,9 @@ module mkTestBlueAddrMap(Empty);
             interrupts.internal.set_shared_irq(False);
         endaction
         action
-            if(interrupts.irqs.lines[2]
-                    || !interrupts.irqs.lines[3]
-                    || !interrupts.irqs.lines[5]) begin
+            if(interrupts.irqs[2]
+                    || !interrupts.irqs[3]
+                    || !interrupts.irqs[5]) begin
                 $display("Interrupt vector bases routed the wrong sources");
                 $finish(1);
             end
@@ -256,9 +267,9 @@ module mkTestBlueAddrMap(Empty);
             interrupts.internal.set_shared_irq(True);
         endaction
         action
-            if(!interrupts.irqs.lines[3]
-                    || interrupts.irqs.lines[2]
-                    || interrupts.irqs.lines[5]) begin
+            if(!interrupts.irqs[3]
+                    || interrupts.irqs[2]
+                    || interrupts.irqs[5]) begin
                 $display("Interrupt map did not OR overlapping source ranges");
                 $finish(1);
             end

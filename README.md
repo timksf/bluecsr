@@ -93,3 +93,7 @@ Interfaces and types:
 AXI4-Lite adapter API:
 - `mkBlueCSRAXI4LiteAdapter` bridges a `BlueCSR_ifc` instance to AXI4-Lite slave read and write channels.
 - `BlueCSR_AXI4Lite_ifc#(aw, dw, ni)` contains the AXI4-Lite read/write slave interfaces and forwards the same interrupt vector.
+
+APB adapter API:
+- `mkBlueCSRAPBAdapter` bridges a `BlueCSR_ifc` instance to a BlueFabric APB slave interface.
+- `BlueCSR_APB_ifc#(aw, dw, user_w, ni)` contains the APB slave interface and forwards the CSR interrupt vector upstream.
