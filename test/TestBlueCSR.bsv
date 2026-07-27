@@ -78,8 +78,8 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
     rg_sts_run      <- csr_reg_ro ('h08, False,                  0, "RUNN",  "Status Running",          "Indicates IP active status.");
     let _rxerr      <- csr_reg_w1c('h08, False, 4, w_sts_rxerr_evt, "RXERR", "Status Receive Error", "Indicates Reception Error.");
     let _stsev      <- csr_reg_w1c('h08, False, 8, w_sts_evt,       "EVENT", "Event Status",          "Indicates a sticky hardware event.");
-    rg_sts_rstrb    <- csr_reg_trigr('h08, False,                   "STSRD", "Status Rd Access Strobe", "Indicates a bus read access to this register.");
-    rg_sts_rstrb2   <- csr_reg_trigr('h08, False,                   "STSR2", "Status Rd Access Strobe", "Checks multiple triggers at one offset.");
+    rg_sts_rstrb    <- csr_reg_trigr('h08, False);
+    rg_sts_rstrb2   <- csr_reg_trigr('h08, False);
 
     csr_reg_def('h0C, "FIFO_RD", "Exclusive FIFO read register");
     csr_reg_fifo_ro('h0C, fifo_error_read, "DATA", "FIFO Data", "Returns SLVERR when the FIFO is empty.");

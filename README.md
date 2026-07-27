@@ -65,11 +65,14 @@ Region accessors:
 - `csr_region_wo` creates a write-only region backed by a write function.
 - `csr_region_rw` creates a read-write region backed by read and write functions.
 
-Trigger fields:
-- `csr_reg_trig` creates a generic trigger bit on read, write, or both, with optional delayed pulse generation.
-- `csr_reg_trigr` creates a trigger bit that pulses on reads.
-- `csr_reg_trigw` creates a trigger bit that pulses on writes.
-- `csr_reg_trigrw` creates a trigger bit that pulses on reads and writes.
+Hardware access triggers:
+- `csr_reg_trig` creates a hardware-only trigger bit on read, write, or both, with optional delayed pulse generation.
+- `csr_reg_trigr` creates a hardware-only trigger bit that pulses on reads.
+- `csr_reg_trigw` creates a hardware-only trigger bit that pulses on writes.
+- `csr_reg_trigrw` creates a hardware-only trigger bit that pulses on reads and writes.
+
+Triggers do not add software-visible fields or documentation metadata. Describe
+their effects in the associated register description.
 
 Runtime and export:
 - `create_blue_csr` builds the live BlueCSR interface from a `BlueCSRCtx_t` definition. Its inferred `ni` parameter configures the external IRQ vector width.

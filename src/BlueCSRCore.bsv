@@ -1010,7 +1010,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_region_ro#(Integer offs, Integer len, functio
 endmodule
 
 
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_trig#(Integer offs, Bool delay, BlueCSRTrigger_t rw, String ident, String name, String desc)(Reg#(Bit#(1)))
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_trig#(Integer offs, Bool delay, BlueCSRTrigger_t rw)(Reg#(Bit#(1)))
     provisos(
         Mul#(TDiv#(dw, 8), 8, dw),
         Div#(dw, 8, TDiv#(dw, 8))
@@ -1038,30 +1038,30 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_trig#(Integer offs, Bool delay, BlueCSRTr
     return rg_trig;
 endmodule
 
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_trigr#(Integer offs, Bool delay, String ident, String name, String desc)(Reg#(Bit#(1)))
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_trigr#(Integer offs, Bool delay)(Reg#(Bit#(1)))
     provisos(
         Mul#(TDiv#(dw, 8), 8, dw),
         Div#(dw, 8, TDiv#(dw, 8))
     );
-    let r <- csr_reg_trig(offs, delay, TRIG_RO, ident, name, desc);
+    let r <- csr_reg_trig(offs, delay, TRIG_RO);
     return r;
 endmodule
 
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_trigw#(Integer offs, Bool delay, String ident, String name, String desc)(Reg#(Bit#(1)))
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_trigw#(Integer offs, Bool delay)(Reg#(Bit#(1)))
     provisos(
         Mul#(TDiv#(dw, 8), 8, dw),
         Div#(dw, 8, TDiv#(dw, 8))
     );
-    let r <- csr_reg_trig(offs, delay, TRIG_WO, ident, name, desc);
+    let r <- csr_reg_trig(offs, delay, TRIG_WO);
     return r;
 endmodule
 
-module [BlueCSRCtx_t#(aw, dw)] csr_reg_trigrw#(Integer offs, Bool delay, String ident, String name, String desc)(Reg#(Bit#(1)))
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_trigrw#(Integer offs, Bool delay)(Reg#(Bit#(1)))
     provisos(
         Mul#(TDiv#(dw, 8), 8, dw),
         Div#(dw, 8, TDiv#(dw, 8))
     );
-    let r <- csr_reg_trig(offs, delay, TRIG_RW, ident, name, desc);
+    let r <- csr_reg_trig(offs, delay, TRIG_RW);
     return r;
 endmodule
 
