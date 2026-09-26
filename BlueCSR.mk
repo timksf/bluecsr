@@ -1,7 +1,14 @@
 #for BSVTools
-MAKEPATH := $(dir $(lastword $(MAKEFILE_LIST)))
-MODULENAME := BlueCSR
-MODULEPATH := $(MAKEPATH)src
-EXTRA_BSV_LIBS += $(MODULEPATH)
+ifndef BLUECSR_MK_INCLUDED
+BLUECSR_MK_INCLUDED := 1
 
-$(info Adding $(MODULENAME) from $(MODULEPATH))
+BLUECSR_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+BLUECSR_SRC  := $(BLUECSR_ROOT)/src
+
+include $(BLUECSR_ROOT)/dep/bluefabric/BlueFabric.mk
+
+EXTRA_BSV_LIBS += $(BLUECSR_SRC)
+
+$(info Adding BlueCSR from $(BLUECSR_SRC))
+
+endif
