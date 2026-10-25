@@ -25,7 +25,7 @@ ARGSCV ?= -show-schedule -remove-dollar
 BLUEAXI_DIR=
 BLUEIMPORT=$(BLUEAXI_DIR):+
 SOURCE_DIRS := . $(foreach dir,$(BLUEAXI_DIR),$(if $(strip $(dir)),$(dir)))
-BSV_SRCS := $(sort $(foreach dir,$(SOURCE_DIRS),$(wildcard $(dir)/*.bsv)))
+BSV_SRCS := $(sort $(TOP_FILE) $(foreach dir,$(SOURCE_DIRS),$(wildcard $(dir)/*.bsv)))
 
 all: $(EXE)
 

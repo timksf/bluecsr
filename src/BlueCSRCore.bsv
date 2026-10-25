@@ -853,6 +853,100 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1s#(Integer offs, t rv, Integer bitpos, 
     return r;
 endmodule
 
+// Register action handlers own their state and consume/produce complete bus
+// words. rv and bitpos describe the field for export; they do not mask data,
+// allocate storage, or reset the callback's state. Each direction is exclusive.
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_act_ops#(BlueCSRAccess_t access_type, Integer offs, t rv, Integer bitpos, Bool can_read, BlueCSR_Rsp_t#(dw) unavailable_rsp, function ActionValue#(BlueCSR_Rsp_t#(dw)) read_fn(), function Bool can_write(Bit#(dw) data, Bit#(TDiv#(dw, 8)) strb), BlueCSRResponse_t unavailable_resp, function ActionValue#(BlueCSRResponse_t) write_fn(Bit#(dw) data, Bit#(TDiv#(dw, 8)) strb), String ident, String name, String desc)()
+    provisos(
+        Bits#(t, sz_t),
+        Add#(sz_t, unused_width, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    if(access_type != CSR_RO && access_type != CSR_WO && access_type != CSR_RW) begin
+        errorM("BlueCSR action field " + ident + " requires RO, WO, or RW access.");
+    end
+    if(bitpos < 0 || valueOf(sz_t) <= 0 || (bitpos + valueOf(sz_t)) > valueOf(dw)) begin
+        errorM("BlueCSR action field " + ident + " lies outside its register word.");
+    end
+
+    function Bool read_available() = can_read;
+
+    if(access_type != CSR_WO) begin
+        RegMapEntry_t#(aw, dw) read_entry = tagged ReadOpAction ReadOpAction_t {
+            offs:            offs,
+            exclusive:       True,
+            can_read:        read_available,
+            unavailable_rsp: unavailable_rsp,
+            f_read:          read_fn
+        };
+        addToCollection(read_entry);
+    end
+    if(access_type != CSR_RO) begin
+        RegMapEntry_t#(aw, dw) write_entry = tagged WriteOpAction WriteOpAction_t {
+            offs:             offs,
+            exclusive:        True,
+            can_write:        can_write,
+            unavailable_resp: unavailable_resp,
+            f_write:          write_fn
+        };
+        addToCollection(write_entry);
+    end
+    RegMapEntry_t#(aw, dw) field_entry = tagged RegFieldDef RegFieldDef_t {
+        offset:      offs,
+        identifier:  ident,
+        name:        name,
+        description: desc,
+        access_type: access_type,
+        bit_offset:  bitpos,
+        width:       valueOf(sz_t),
+        reset_value: "0x" + integerToHex(bit_to_integer(pack(rv)))
+    };
+    addToCollection(field_entry);
+endmodule
+
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_act_ro#(Integer offs, t rv, Integer bitpos, Bool can_read, BlueCSR_Rsp_t#(dw) unavailable_rsp, function ActionValue#(BlueCSR_Rsp_t#(dw)) read_fn(), String ident, String name, String desc)()
+    provisos(
+        Bits#(t, sz_t),
+        Add#(sz_t, unused_width, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    function Bool can_write(Bit#(dw) data, Bit#(TDiv#(dw, 8)) strb) = False;
+    function ActionValue#(BlueCSRResponse_t) write_fn(Bit#(dw) data, Bit#(TDiv#(dw, 8)) strb);
+        actionvalue
+            return CSR_DECERR;
+        endactionvalue
+    endfunction
+    csr_reg_act_ops(CSR_RO, offs, rv, bitpos, can_read, unavailable_rsp, read_fn, can_write, CSR_DECERR, write_fn, ident, name, desc);
+endmodule
+
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_act_wo#(Integer offs, t rv, Integer bitpos, function Bool can_write(Bit#(dw) data, Bit#(TDiv#(dw, 8)) strb), BlueCSRResponse_t unavailable_resp, function ActionValue#(BlueCSRResponse_t) write_fn(Bit#(dw) data, Bit#(TDiv#(dw, 8)) strb), String ident, String name, String desc)()
+    provisos(
+        Bits#(t, sz_t),
+        Add#(sz_t, unused_width, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    BlueCSR_Rsp_t#(dw) unavailable_rsp = BlueCSR_Rsp_t { rdata: 0, resp: CSR_DECERR };
+    function ActionValue#(BlueCSR_Rsp_t#(dw)) read_fn();
+        actionvalue
+            return unavailable_rsp;
+        endactionvalue
+    endfunction
+    csr_reg_act_ops(CSR_WO, offs, rv, bitpos, False, unavailable_rsp, read_fn, can_write, unavailable_resp, write_fn, ident, name, desc);
+endmodule
+
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_act_rw#(Integer offs, t rv, Integer bitpos, Bool can_read, BlueCSR_Rsp_t#(dw) unavailable_rsp, function ActionValue#(BlueCSR_Rsp_t#(dw)) read_fn(), function Bool can_write(Bit#(dw) data, Bit#(TDiv#(dw, 8)) strb), BlueCSRResponse_t unavailable_resp, function ActionValue#(BlueCSRResponse_t) write_fn(Bit#(dw) data, Bit#(TDiv#(dw, 8)) strb), String ident, String name, String desc)()
+    provisos(
+        Bits#(t, sz_t),
+        Add#(sz_t, unused_width, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    csr_reg_act_ops(CSR_RW, offs, rv, bitpos, can_read, unavailable_rsp, read_fn, can_write, unavailable_resp, write_fn, ident, name, desc);
+endmodule
+
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_fifo_ro#(Integer offs, FIFOF#(t) fifo, String ident, String name, String desc)()
     provisos(
         Bits#(t, sz_t),
@@ -1257,6 +1351,8 @@ module [Module] create_blue_csr_with_default_response#(
         end
         else begin
             read_rules = rJoinMutuallyExclusive(rules
+                // Only the selected callback branch needs its method guards.
+                (* aggressive_implicit_conditions *)
                 rule rread_reg_action_available(!req.wr && req_hit && req_rd_allowed && field_actions[0].can_read);
                     let action_rsp <- field_actions[0].f_read;
                     f_rsp.enq(
@@ -1300,6 +1396,8 @@ module [Module] create_blue_csr_with_default_response#(
         end
         else begin
             write_rules = rJoinMutuallyExclusive(rules
+                // Preserve conditional method guards in write callbacks.
+                (* aggressive_implicit_conditions *)
                 rule rwrite_reg_action_available(req.wr && req_hit && req_wr_allowed && write_actions[0].can_write(req.wdata, req.wstrb));
                     let action_resp <- write_actions[0].f_write(req.wdata, req.wstrb);
                     if(action_resp == CSR_OKAY || action_resp == CSR_EXOKAY) begin

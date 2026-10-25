@@ -15,8 +15,8 @@ Ordinary fields contribute combinational read values and simple write actions.
 Those contributions are composed at each register offset. Side-effecting or
 fallible accesses, such as FIFO dequeue/enqueue, use a separate scheduled
 `ActionValue` path. This split is internal to map construction and is required
-for correct Bluespec scheduling; normal users should use the field, FIFO, and
-region constructors below rather than creating operation entries directly.
+for correct Bluespec scheduling. Use the field, action, FIFO, and region
+constructors below rather than creating operation entries directly.
 
 With `create_blue_csr`, requests in a direction unsupported by a register or
 region return `CSR_DECERR`. A side-effecting handler can return a more specific
@@ -40,7 +40,7 @@ different result should add an explicit handler for that access.
 Field definitions:
 - `csr_reg_field` generic field constructor for any `BlueCSRAccess_t` mode.
 - `csr_reg_hu` creates an RW field whose readable state remains owned by
-  BlueCSR. Its hardware update input is a `Maybe#(t)`; `Invalid` means no
+  BlueCSR. Its hardware update input is a `Maybe#(t)`. `Invalid` means no
   update, and a same-cycle `Valid` update takes priority over a software write.
 - `csr_reg_ho` creates an RO field whose readable state remains owned by
   BlueCSR and is updated only by hardware. It also takes a `Maybe#(t)` update
@@ -52,13 +52,32 @@ Field definitions:
 - `csr_reg_ws` creates a write-set field.
 - `csr_reg_wc` creates a write-clear field.
 - `csr_reg_w1c` creates a write-1-to-clear field with a hardware update value
-  represented as `Maybe#(t)`; valid hardware updates take priority over
+  represented as `Maybe#(t)`. Valid hardware updates take priority over
   software clearing.
 - `csr_irq` creates an event-latched W1C pending field and its RW enable field, then contributes `pending && enable` to a selected external IRQ line. Multiple fields may OR onto one line, and one map may drive multiple lines.
 - `csr_reg_w1s` creates a write-1-to-set field.
 - `csr_reg_fifo_ro` creates an exclusive, LSB-aligned FIFO read that returns `CSR_SLVERR` when empty. FIFO widths must be byte multiples no wider than the CSR data width.
 - `csr_reg_fifo_ro_valid` creates a non-failing FIFO read with byte-multiple data at the least-significant bits and a valid bit immediately above it. The FIFO element width plus one must fit in the CSR data width.
 - `csr_reg_fifo_wo` creates an exclusive, LSB-aligned FIFO write that accepts exactly the byte strobes occupied by the FIFO field and returns `CSR_SLVERR` when full. FIFO widths must be byte multiples no wider than the CSR data width.
+
+Action accessors:
+
+- `csr_reg_act_ro` registers an exclusive action read.
+- `csr_reg_act_wo` registers an exclusive action write.
+- `csr_reg_act_rw` registers independent action reads and writes.
+
+Declare the register with `csr_reg_def` first. These helpers allocate no storage.
+`rv` and `bitpos` describe only the field's reset value, width, and position.
+Callbacks operate on full bus words and raw byte strobes, without masking or
+shifting. The caller owns state and reset.
+
+`read_fn()` returns `ActionValue#(BlueCSR_Rsp_t#(dw))`.
+`write_fn(data, strb)` returns `ActionValue#(BlueCSRResponse_t)`.
+`can_read` is a dynamic `Bool`. `can_write(data, strb)` returns `Bool`.
+False readiness returns the supplied unavailable response without invoking the
+callback. Readiness must cover the called methods' guards. Callback execution
+is atomic with request consumption and response enqueue. Returned errors do
+not roll back side effects. Normal access policies apply.
 
 Region accessors:
 - `csr_region_ro` creates a read-only region backed by a read function.
