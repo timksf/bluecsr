@@ -118,6 +118,7 @@ AXI4-Lite adapter API:
 - The adapter serves one transaction at a time and prefers reads. AR, AW and W each have a one-entry holding register. All outputs are registered.
 - `axi4_rd_buffer` / `axi4_wr_buffer`: `0` gives a response one cycle after the handshake. Values above `0` register the request first and give two cycles.
 - `create_blue_csr(..., True)` adds another cycle.
+- The CSR address width may be smaller than the AXI address width. Upper address bits are ignored, so the interconnect must decode them. The AXI width cannot be inferred from the CSR core, so declare the adapter's interface type.
 
 APB adapter API:
 - `mkBlueCSRAPBAdapter` bridges a `BlueCSR_ifc` instance to a BlueFabric APB slave interface.

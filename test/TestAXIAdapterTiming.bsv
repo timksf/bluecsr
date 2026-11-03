@@ -17,7 +17,7 @@ interface TimingDut_ifc;
     interface AXI4_Lite_Slave_Wr_Fab#(32, 32) s_wr;
 endinterface
 
-module [BlueCSRCtx_t#(32, 32)] timing_csrs(Empty);
+module [BlueCSRCtx_t#(caw, 32)] timing_csrs(Empty);
     csr_regmap_def("Timing", "AXI adapter timing test registers");
     csr_reg_def('h00, "ID", "Constant");
     csr_reg_rc('h00, Bit#(32)'('hCAFE0001), 0, "ID", "ID", "Constant ID.");
@@ -28,6 +28,15 @@ endmodule
 module [Module] mkTimingDut#(Integer buffer)(TimingDut_ifc);
     BlueCSRAccess_ifc#(32, 32, 0, Empty) csr <- create_blue_csr(timing_csrs, False);
     BlueCSR_AXI4Lite_ifc#(32, 32, 0) axi <- mkBlueCSRAXI4LiteAdapter(csr.external, buffer, buffer);
+    interface s_rd = axi.s_rd;
+    interface s_wr = axi.s_wr;
+endmodule
+
+//decodes 12 address bits behind a 32 bit bus
+(* synthesize *)
+module mkTimingDutNarrow(TimingDut_ifc);
+    BlueCSRAccess_ifc#(12, 32, 0, Empty) csr <- create_blue_csr(timing_csrs, False);
+    BlueCSR_AXI4Lite_ifc#(32, 32, 0) axi <- mkBlueCSRAXI4LiteAdapter(csr.external, 0, 0);
     interface s_rd = axi.s_rd;
     interface s_wr = axi.s_wr;
 endmodule
@@ -48,7 +57,7 @@ interface TimingTester_ifc;
     method Bool done;
 endinterface
 
-module mkTimingTester#(TimingDut_ifc dut, String name, Integer latency)(TimingTester_ifc);
+module mkTimingTester#(TimingDut_ifc dut, String name, Integer latency, Bool narrow)(TimingTester_ifc);
     Reg#(UInt#(32)) rg_cycle <- mkReg(0);
 
     Reg#(Bool)     rg_arvalid <- mkReg(False);
@@ -229,6 +238,18 @@ module mkTimingTester#(TimingDut_ifc dut, String name, Integer latency)(TimingTe
         expect_read('hDDDD0004, OKAY);
         expect_read('hCAFE0001, OKAY);
 
+        //upper address bits are ignored by a narrow decoder
+        if(narrow) seq
+            read('hABCD_E000);
+            expect_read('hCAFE0001, OKAY);
+            write('h1234_5004, 'hEEEE0005);
+            expect_write(OKAY);
+            read('h04);
+            expect_read('hEEEE0005, OKAY);
+            read('hFFFF_F040);
+            expect_read(0, DECERR);
+        endseq
+
         rg_done <= True;
     endseq;
 
@@ -246,9 +267,11 @@ endmodule
 module [Module] mkTestAXIAdapterTiming(Empty);
     TimingDut_ifc dut0 <- mkTimingDut0;
     TimingDut_ifc dut1 <- mkTimingDut1;
+    TimingDut_ifc dut2 <- mkTimingDutNarrow;
 
-    TimingTester_ifc t0 <- mkTimingTester(dut0, "buffer 0", 1);
-    TimingTester_ifc t1 <- mkTimingTester(dut1, "buffer 1", 2);
+    TimingTester_ifc t0 <- mkTimingTester(dut0, "buffer 0", 1, False);
+    TimingTester_ifc t1 <- mkTimingTester(dut1, "buffer 1", 2, False);
+    TimingTester_ifc t2 <- mkTimingTester(dut2, "12 bit decode", 1, True);
 
     Reg#(UInt#(16)) rg_timeout <- mkReg(0);
 
@@ -260,7 +283,7 @@ module [Module] mkTestAXIAdapterTiming(Empty);
         end
     endrule
 
-    rule r_finish if(t0.done && t1.done);
+    rule r_finish if(t0.done && t1.done && t2.done);
         $display("Finished AXI adapter timing TB");
         $finish(0);
     endrule

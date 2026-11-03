@@ -14,7 +14,7 @@ import TestBlueCSR :: *;
 module [Module] mkTestAXIAdapter(Empty);
 
     let cfg <- mk_config;
-    let axi_cfg <- mkBlueCSRAXI4LiteAdapter(cfg.external, 1, 1);
+    BlueCSR_AXI4Lite_ifc#(32, 32, 2) axi_cfg <- mkBlueCSRAXI4LiteAdapter(cfg.external, 1, 1);
 
     AXI4_Lite_Master_Rd#(32, 32) m_rd <- mkAXI4_Lite_Master_Rd(1);
     AXI4_Lite_Master_Wr#(32, 32) m_wr <- mkAXI4_Lite_Master_Wr(1);

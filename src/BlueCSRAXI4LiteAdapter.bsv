@@ -36,8 +36,15 @@ endfunction
  * from the bus straight to the CSR core; the response is then valid in the
  * next cycle. A value above 0 always registers the request first, which cuts
  * the bus-to-decode path and adds one cycle. Responses are always registered.
+ *
+ * The CSR core may decode fewer address bits (caw) than the bus carries (aw).
+ * Upper address bits are dropped, so the register map repeats every 2^caw
+ * bytes and the interconnect has to decode them.
  */
-module mkBlueCSRAXI4LiteAdapter#(BlueCSR_ifc#(aw, dw, ni) csr, Integer axi4_rd_buffer, Integer axi4_wr_buffer)(BlueCSR_AXI4Lite_ifc#(aw, dw, ni));
+module mkBlueCSRAXI4LiteAdapter#(BlueCSR_ifc#(caw, dw, ni) csr, Integer axi4_rd_buffer, Integer axi4_wr_buffer)(BlueCSR_AXI4Lite_ifc#(aw, dw, ni))
+    provisos(
+        Add#(caw, unused_addr_bits, aw)
+    );
 
     let reset_asserted <- isResetAsserted();
 
@@ -45,11 +52,11 @@ module mkBlueCSRAXI4LiteAdapter#(BlueCSR_ifc#(aw, dw, ni) csr, Integer axi4_rd_b
     Bool wr_direct = axi4_wr_buffer == 0;
 
     Wire#(Bool)                      w_arvalid <- mkBypassWire;
-    Wire#(Bit#(aw))                  w_araddr  <- mkBypassWire;
+    Wire#(Bit#(caw))                 w_araddr  <- mkBypassWire;
     Wire#(AXI4_Lite_Prot)            w_arprot  <- mkBypassWire;
     Wire#(Bool)                      w_rready  <- mkBypassWire;
     Wire#(Bool)                      w_awvalid <- mkBypassWire;
-    Wire#(Bit#(aw))                  w_awaddr  <- mkBypassWire;
+    Wire#(Bit#(caw))                 w_awaddr  <- mkBypassWire;
     Wire#(AXI4_Lite_Prot)            w_awprot  <- mkBypassWire;
     Wire#(Bool)                      w_wvalid  <- mkBypassWire;
     Wire#(Bit#(dw))                  w_wdata   <- mkBypassWire;
@@ -57,10 +64,10 @@ module mkBlueCSRAXI4LiteAdapter#(BlueCSR_ifc#(aw, dw, ni) csr, Integer axi4_rd_b
     Wire#(Bool)                      w_bready  <- mkBypassWire;
 
     Reg#(Bool)                       rg_ar_full <- mkReg(False);
-    Reg#(Bit#(aw))                   rg_ar_addr <- mkRegU;
+    Reg#(Bit#(caw))                  rg_ar_addr <- mkRegU;
     Reg#(AXI4_Lite_Prot)             rg_ar_prot <- mkRegU;
     Reg#(Bool)                       rg_aw_full <- mkReg(False);
-    Reg#(Bit#(aw))                   rg_aw_addr <- mkRegU;
+    Reg#(Bit#(caw))                  rg_aw_addr <- mkRegU;
     Reg#(AXI4_Lite_Prot)             rg_aw_prot <- mkRegU;
     Reg#(Bool)                       rg_w_full  <- mkReg(False);
     Reg#(Bit#(dw))                   rg_w_data  <- mkRegU;
@@ -95,7 +102,7 @@ module mkBlueCSRAXI4LiteAdapter#(BlueCSR_ifc#(aw, dw, ni) csr, Integer axi4_rd_b
     Bool issue_wr = !rg_busy && !rd_avail && aw_avail && w_avail;
 
     rule r_issue if(issue_rd || issue_wr);
-        BlueCSR_Req_t#(aw, dw) req = ?;
+        BlueCSR_Req_t#(caw, dw) req = ?;
         if(issue_rd) begin
             req = BlueCSR_Req_t {
                 wr:    False,
@@ -168,7 +175,9 @@ module mkBlueCSRAXI4LiteAdapter#(BlueCSR_ifc#(aw, dw, ni) csr, Integer axi4_rd_b
     interface AXI4_Lite_Slave_Rd_Fab s_rd;
         method arready  = ar_ready;
         method parvalid = w_arvalid._write;
-        method paraddr  = w_araddr._write;
+        method Action paraddr(Bit#(aw) a);
+            w_araddr <= truncate(a);
+        endmethod
         method parprot  = w_arprot._write;
         method rvalid   = rvalid;
         method prready  = w_rready._write;
@@ -179,7 +188,9 @@ module mkBlueCSRAXI4LiteAdapter#(BlueCSR_ifc#(aw, dw, ni) csr, Integer axi4_rd_b
     interface AXI4_Lite_Slave_Wr_Fab s_wr;
         method awready  = aw_ready;
         method pawvalid = w_awvalid._write;
-        method pawaddr  = w_awaddr._write;
+        method Action pawaddr(Bit#(aw) a);
+            w_awaddr <= truncate(a);
+        endmethod
         method pawprot  = w_awprot._write;
         method wready   = w_ready;
         method pwvalid  = w_wvalid._write;
