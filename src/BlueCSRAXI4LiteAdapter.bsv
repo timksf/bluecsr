@@ -2,6 +2,7 @@ package BlueCSRAXI4LiteAdapter;
 
 import GetPut :: *;
 import Vector :: *;
+import Clocks :: *;
 
 import BlueAXI :: *;
 import BlueCSRCore :: *;
@@ -27,70 +28,168 @@ function AXI4_Lite_Response bluecsr_to_axi_lite_resp(BlueCSRResponse_t resp);
     endcase;
 endfunction
 
+/*
+ * One transaction is in flight at a time; reads win over writes
+ *
+ * AR, AW and W each own a one-entry holding register, so READY only depends
+ * on adapter state. A buffer value of 0 lets an idle adapter pass a request
+ * from the bus straight to the CSR core; the response is then valid in the
+ * next cycle. A value above 0 always registers the request first, which cuts
+ * the bus-to-decode path and adds one cycle. Responses are always registered.
+ */
 module mkBlueCSRAXI4LiteAdapter#(BlueCSR_ifc#(aw, dw, ni) csr, Integer axi4_rd_buffer, Integer axi4_wr_buffer)(BlueCSR_AXI4Lite_ifc#(aw, dw, ni));
 
-    AXI4_Lite_Slave_Rd#(aw, dw) axi4l_rd <- mkAXI4_Lite_Slave_Rd(axi4_rd_buffer);
-    AXI4_Lite_Slave_Wr#(aw, dw) axi4l_wr <- mkAXI4_Lite_Slave_Wr(axi4_wr_buffer);
+    let reset_asserted <- isResetAsserted();
 
-    Reg#(Bool) rg_rd_pending <- mkReg(False);
-    Reg#(Bool) rg_wr_pending <- mkReg(False);
+    Bool rd_direct = axi4_rd_buffer == 0;
+    Bool wr_direct = axi4_wr_buffer == 0;
 
-    //favor read requests for now
-    (*descending_urgency="rread_req, rwrite_req"*)
-    (*mutually_exclusive="rread_rsp, rwrite_rsp"*)
+    Wire#(Bool)                      w_arvalid <- mkBypassWire;
+    Wire#(Bit#(aw))                  w_araddr  <- mkBypassWire;
+    Wire#(AXI4_Lite_Prot)            w_arprot  <- mkBypassWire;
+    Wire#(Bool)                      w_rready  <- mkBypassWire;
+    Wire#(Bool)                      w_awvalid <- mkBypassWire;
+    Wire#(Bit#(aw))                  w_awaddr  <- mkBypassWire;
+    Wire#(AXI4_Lite_Prot)            w_awprot  <- mkBypassWire;
+    Wire#(Bool)                      w_wvalid  <- mkBypassWire;
+    Wire#(Bit#(dw))                  w_wdata   <- mkBypassWire;
+    Wire#(Bit#(TDiv#(dw, 8)))        w_wstrb   <- mkBypassWire;
+    Wire#(Bool)                      w_bready  <- mkBypassWire;
 
-    rule rread_req if(!rg_rd_pending && !rg_wr_pending);
-        let axi_req <- axi4l_rd.request.get;
-        csr.request.put(
-            BlueCSR_Req_t {
-                wr:     False,
-                addr:   axi_req.addr,
-                wdata:  ?,
-                wstrb:  ?,
-                prot:   axi_lite_to_bluecsr_prot(axi_req.prot)
-            }
-        );
-        rg_rd_pending <= True;
+    Reg#(Bool)                       rg_ar_full <- mkReg(False);
+    Reg#(Bit#(aw))                   rg_ar_addr <- mkRegU;
+    Reg#(AXI4_Lite_Prot)             rg_ar_prot <- mkRegU;
+    Reg#(Bool)                       rg_aw_full <- mkReg(False);
+    Reg#(Bit#(aw))                   rg_aw_addr <- mkRegU;
+    Reg#(AXI4_Lite_Prot)             rg_aw_prot <- mkRegU;
+    Reg#(Bool)                       rg_w_full  <- mkReg(False);
+    Reg#(Bit#(dw))                   rg_w_data  <- mkRegU;
+    Reg#(Bit#(TDiv#(dw, 8)))         rg_w_strb  <- mkRegU;
+
+    //set when a request enters the CSR core, cleared by the R or B handshake
+    Reg#(Bool)                       rg_busy     <- mkReg(False);
+    Reg#(Bool)                       rg_rsp_wr   <- mkRegU;
+    Reg#(Bool)                       rg_rsp_full <- mkReg(False);
+    Reg#(Bit#(dw))                   rg_rdata    <- mkRegU;
+    Reg#(BlueCSRResponse_t)          rg_resp     <- mkRegU;
+
+    PulseWire pw_issue_rd <- mkPulseWire;
+    PulseWire pw_issue_wr <- mkPulseWire;
+    PulseWire pw_complete <- mkPulseWire;
+
+    Bool ar_ready = !reset_asserted && !rg_ar_full;
+    Bool aw_ready = !reset_asserted && !rg_aw_full;
+    Bool w_ready  = !reset_asserted && !rg_w_full;
+    Bool rvalid   = !reset_asserted && rg_rsp_full && !rg_rsp_wr;
+    Bool bvalid   = !reset_asserted && rg_rsp_full && rg_rsp_wr;
+
+    Bool ar_fire = ar_ready && w_arvalid;
+    Bool aw_fire = aw_ready && w_awvalid;
+    Bool w_fire  = w_ready  && w_wvalid;
+
+    Bool rd_avail = rg_ar_full || (rd_direct && ar_fire);
+    Bool aw_avail = rg_aw_full || (wr_direct && aw_fire);
+    Bool w_avail  = rg_w_full  || (wr_direct && w_fire);
+
+    Bool issue_rd = !rg_busy && rd_avail;
+    Bool issue_wr = !rg_busy && !rd_avail && aw_avail && w_avail;
+
+    rule r_issue if(issue_rd || issue_wr);
+        BlueCSR_Req_t#(aw, dw) req = ?;
+        if(issue_rd) begin
+            req = BlueCSR_Req_t {
+                wr:    False,
+                addr:  rg_ar_full ? rg_ar_addr : w_araddr,
+                wdata: ?,
+                wstrb: ?,
+                prot:  axi_lite_to_bluecsr_prot(rg_ar_full ? rg_ar_prot : w_arprot)
+            };
+            pw_issue_rd.send;
+        end else begin
+            req = BlueCSR_Req_t {
+                wr:    True,
+                addr:  rg_aw_full ? rg_aw_addr : w_awaddr,
+                wdata: rg_w_full ? rg_w_data : w_wdata,
+                wstrb: rg_w_full ? rg_w_strb : w_wstrb,
+                prot:  axi_lite_to_bluecsr_prot(rg_aw_full ? rg_aw_prot : w_awprot)
+            };
+            pw_issue_wr.send;
+        end
+        csr.request.put(req);
+        rg_rsp_wr <= !issue_rd;
     endrule
 
-    rule rread_rsp if(rg_rd_pending);
-        let csr_rsp <- csr.response.get;
-        axi4l_rd.response.put(
-            AXI4_Lite_Read_Rs_Pkg {
-                data: csr_rsp.rdata,
-                resp: bluecsr_to_axi_lite_resp(csr_rsp.resp)
-            }
-        );
-        rg_rd_pending <= False;
+    //store accepted requests that did not go straight to the CSR core
+    rule r_hold;
+        if(rg_ar_full) begin
+            if(pw_issue_rd) rg_ar_full <= False;
+        end else if(ar_fire && !pw_issue_rd) begin
+            rg_ar_full <= True;
+            rg_ar_addr <= w_araddr;
+            rg_ar_prot <= w_arprot;
+        end
+
+        if(rg_aw_full) begin
+            if(pw_issue_wr) rg_aw_full <= False;
+        end else if(aw_fire && !pw_issue_wr) begin
+            rg_aw_full <= True;
+            rg_aw_addr <= w_awaddr;
+            rg_aw_prot <= w_awprot;
+        end
+
+        if(rg_w_full) begin
+            if(pw_issue_wr) rg_w_full <= False;
+        end else if(w_fire && !pw_issue_wr) begin
+            rg_w_full <= True;
+            rg_w_data <= w_wdata;
+            rg_w_strb <= w_wstrb;
+        end
     endrule
 
-    rule rwrite_req if(!rg_rd_pending && !rg_wr_pending);
-        let axi_req <- axi4l_wr.request.get;
-        csr.request.put(
-            BlueCSR_Req_t {
-                wr:     True,
-                addr:   axi_req.addr,
-                wdata:  axi_req.data,
-                wstrb:  axi_req.strb,
-                prot:   axi_lite_to_bluecsr_prot(axi_req.prot)
-            }
-        );
-        rg_wr_pending <= True;
+    rule r_response(!rg_rsp_full);
+        let rsp <- csr.response.get;
+        rg_rdata    <= rsp.rdata;
+        rg_resp     <= rsp.resp;
+        rg_rsp_full <= True;
     endrule
 
-    rule rwrite_rsp if(rg_wr_pending);
-        let csr_rsp <- csr.response.get;
-        axi4l_wr.response.put(
-            AXI4_Lite_Write_Rs_Pkg {
-                resp: bluecsr_to_axi_lite_resp(csr_rsp.resp)
-            }
-        );
-        rg_wr_pending <= False;
+    rule r_complete((rvalid && w_rready) || (bvalid && w_bready));
+        rg_rsp_full <= False;
+        pw_complete.send;
     endrule
 
+    rule r_busy;
+        if(pw_issue_rd || pw_issue_wr)
+            rg_busy <= True;
+        else if(pw_complete)
+            rg_busy <= False;
+    endrule
 
-    interface s_rd = axi4l_rd.fab;
-    interface s_wr = axi4l_wr.fab;
+    interface AXI4_Lite_Slave_Rd_Fab s_rd;
+        method arready  = ar_ready;
+        method parvalid = w_arvalid._write;
+        method paraddr  = w_araddr._write;
+        method parprot  = w_arprot._write;
+        method rvalid   = rvalid;
+        method prready  = w_rready._write;
+        method rdata    = rg_rdata;
+        method rresp    = bluecsr_to_axi_lite_resp(rg_resp);
+    endinterface
+
+    interface AXI4_Lite_Slave_Wr_Fab s_wr;
+        method awready  = aw_ready;
+        method pawvalid = w_awvalid._write;
+        method pawaddr  = w_awaddr._write;
+        method pawprot  = w_awprot._write;
+        method wready   = w_ready;
+        method pwvalid  = w_wvalid._write;
+        method pwdata   = w_wdata._write;
+        method pwstrb   = w_wstrb._write;
+        method bvalid   = bvalid;
+        method pbready  = w_bready._write;
+        method bresp    = bluecsr_to_axi_lite_resp(rg_resp);
+    endinterface
+
     method irqs = csr.irqs;
 endmodule
 
