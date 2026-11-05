@@ -18,11 +18,11 @@ interface ActionTest_ifc;
 endinterface
 
 module [BlueCSRCtx_t#(8, 32)] action_test_map(ActionTest_ifc);
-    FIFOF#(Bit#(32)) f_read  <- mkSizedFIFOF(1);
-    FIFOF#(Bit#(36)) f_write <- mkSizedFIFOF(1);
-    Reg#(Bool)      rg_read_enabled <- mkReg(True);
-    Reg#(Bit#(8))   rg_reads        <- mkReg(0);
-    Reg#(Bit#(32))  rg_value        <- mkReg('h12345678);
+    FIFOF#(Bit#(32)) f_read          <- mkSizedFIFOF(1);
+    FIFOF#(Bit#(36)) f_write         <- mkSizedFIFOF(1);
+    Reg#(Bool)       rg_read_enabled <- mkReg(True);
+    Reg#(Bit#(8))    rg_reads        <- mkReg(0);
+    Reg#(Bit#(32))   rg_value        <- mkReg('h12345678);
 
     function ActionValue#(BlueCSR_Rsp_t#(32)) read_fifo();
         actionvalue
@@ -96,8 +96,8 @@ module [BlueCSRCtx_t#(8, 32)] action_test_map(ActionTest_ifc);
 endmodule
 
 module [Module] mkActionTest#(Bool buffer_in)(ReadOnly#(Bool));
-    BlueCSRAccess_ifc#(8, 32, 0, ActionTest_ifc) i_csr <- create_blue_csr(action_test_map, buffer_in);
-    Reg#(Bool) rg_done <- mkReg(False);
+    BlueCSRAccess_ifc#(8, 32, 0, ActionTest_ifc) i_csr   <- create_blue_csr(action_test_map, buffer_in);
+    Reg#(Bool)                                   rg_done <- mkReg(False);
 
     function Stmt access(Bool wr, Bit#(8) addr, Bit#(32) data, Bit#(4) strb, BlueCSRProt_t prot, Bit#(32) expected_data, BlueCSRResponse_t expected_resp);
         return seq
@@ -116,7 +116,7 @@ module [Module] mkActionTest#(Bool buffer_in)(ReadOnly#(Bool));
     endfunction
 
     Stmt test = seq
-        // Unavailable guarded operations must respond without invoking methods.
+        //unavailable guarded operations must respond without invoking methods
         access(False, 'h00, 0, 0, CSR_SECURE, 'hfeedface, CSR_SLVERR);
         access(True,  'h00, 1, 'hf, CSR_SECURE, 0, CSR_DECERR);
         access(False, 'h04, 0, 0, CSR_SECURE, 0, CSR_DECERR);
@@ -129,7 +129,7 @@ module [Module] mkActionTest#(Bool buffer_in)(ReadOnly#(Bool));
 
         access(True, 'h04, 'h12345678, 5, CSR_SECURE, 0, CSR_OKAY);
         access(True, 'h04, 'h98765432, 1, CSR_SECURE, 0, CSR_SLVERR);
-        // Rejection and strobe no-ops remain available even with a full FIFO.
+        //rejection and strobe no-ops remain available even with a full FIFO
         access(True, 'h04, 'hdeadbeef, 'hf, CSR_SECURE, 0, CSR_SLVERR);
         access(True, 'h04, 'hffffffff, 2, CSR_SECURE, 0, CSR_OKAY);
         access(True, 'h04, 'hffffffff, 0, CSR_SECURE, 0, CSR_OKAY);
@@ -160,11 +160,11 @@ module [Module] mkActionTest#(Bool buffer_in)(ReadOnly#(Bool));
                 $finish(1);
             end
         endaction
-        // Read readiness does not gate the independent write direction.
+        //read readiness does not gate the independent write direction
         access(True, 'h08, 'h55, 1, CSR_INSECURE, 0, CSR_OKAY);
         i_csr.internal.enable_read(True);
 
-        // A held response must not cause the side effect to repeat.
+        //a held response must not cause the side effect to repeat
         i_csr.external.request.put(BlueCSR_Req_t {
             wr: False, addr: 'h08, wdata: 0, wstrb: 0, prot: CSR_SECURE
         });
@@ -185,7 +185,7 @@ module [Module] mkActionTest#(Bool buffer_in)(ReadOnly#(Bool));
     method _read = rg_done;
 endmodule
 
-// Also elaborate a narrower bus with a field ending at the top bus bit.
+//also elaborate a narrower bus with a field ending at the top bus bit
 module [BlueCSRCtx_t#(8, 16)] action_narrow_map(Empty);
     function ActionValue#(BlueCSR_Rsp_t#(16)) read_fn();
         actionvalue
@@ -207,14 +207,14 @@ endmodule
 
 (* synthesize *)
 module [Module] mkTestBlueCSRAct(Empty);
-    ReadOnly#(Bool) i_unbuffered <- mkActionTest(False);
-    ReadOnly#(Bool) i_buffered   <- mkActionTest(True);
-    BlueCSRAccess_ifc#(8, 16, 0, Empty) i_narrow <- create_blue_csr(action_narrow_map, False);
-    Reg#(UInt#(16)) rg_cycles <- mkReg(0);
+    ReadOnly#(Bool)                     i_unbuffered <- mkActionTest(False);
+    ReadOnly#(Bool)                     i_buffered   <- mkActionTest(True);
+    BlueCSRAccess_ifc#(8, 16, 0, Empty) i_narrow     <- create_blue_csr(action_narrow_map, False);
+    Reg#(UInt#(16))                     rg_cycles    <- mkReg(0);
 
     let {_, entries} <- getCollection(action_test_map);
     let validation = validate_blue_csr_entries(entries);
-    let fields = List::concat(List::map(get_regfield_def, entries));
+    let fields     = List::concat(List::map(get_regfield_def, entries));
     if(!validation.valid) errorM(validation.errors);
     if(length(fields) != 3 || fields[0].access_type != CSR_RO || fields[0].width != 8 || fields[0].bit_offset != 8 ||
        fields[1].access_type != CSR_WO || fields[1].width != 2 ||

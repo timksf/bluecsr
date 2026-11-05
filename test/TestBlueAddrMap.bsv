@@ -26,8 +26,7 @@ module mkTestApbTarget#(Bit#(2) id)(TestApbTarget_ifc);
     method Bit#(2) target_id = id;
 endmodule
 
-// A mapped-device module instantiates its peripheral and contributes the
-// corresponding entry to its caller's fabric context.
+//a mapped-device module instantiates its peripheral and contributes the corresponding entry to its caller's fabric context
 module [AddrMapCtx_t#(32, TestApbTarget_ifc)] mapped_apb_target#(Integer base, String name, Bit#(2) id)(TestApbTarget_ifc);
     TestApbTarget_ifc i_target <- mkTestApbTarget(id);
     addr_map_target(base, 'h0000_1000, name, i_target);
@@ -40,8 +39,7 @@ interface TestApbSubsystem_ifc;
     interface TestApbTarget_ifc boot_status;
 endinterface
 
-// This is one downstream APB segment. Its peripheral instances and map are
-// separate from the upstream high-performance fabric.
+//this is one downstream APB segment. Its peripheral instances and map are separate from the upstream high-performance fabric.
 module [AddrMapCtx_t#(32, TestApbTarget_ifc)] apb_peripheral_map(TestApbSubsystem_ifc);
     addr_map_def("exampleSoCAPB");
 
@@ -60,9 +58,7 @@ interface TestAhbToApbBridge_ifc#(type downstream_ifc);
     interface downstream_ifc downstream;
 endinterface
 
-// A protocol bridge consumes the APB context once and exposes one native AHB
-// target to the parent fabric. A real implementation also connects the two
-// protocols' channels and keeps their response state.
+//a protocol bridge consumes the APB context once and exposes one native AHB target to the parent fabric. A real implementation also connects the two protocols' channels and keeps their response state.
 module [Module] mkTestAhbToApbBridge#(AddrMapCtx_t#(32, TestApbTarget_ifc, downstream_ifc) downstream_ctx)(TestAhbToApbBridge_ifc#(downstream_ifc));
     TestAhbTarget_ifc i_upstream <- mkTestAhbTarget(1);
     AddrMap_ifc#(32, downstream_ifc) i_downstream <- create_addr_map(
@@ -79,8 +75,7 @@ interface TestSocFabric_ifc;
     interface TestAhbToApbBridge_ifc#(TestApbSubsystem_ifc) peripherals;
 endinterface
 
-// The upstream map sees one memory and one bridge aperture. It does not repeat
-// the downstream peripheral map or depend on a separately ordered client list.
+//the upstream map sees one memory and one bridge aperture. It does not repeat the downstream peripheral map or depend on a separately ordered client list.
 module [AddrMapCtx_t#(32, TestAhbTarget_ifc)] soc_address_map(TestSocFabric_ifc);
     addr_map_def("exampleSoC");
 
@@ -122,24 +117,24 @@ endinterface
 module [IRQMapCtx_t#(8)] soc_irq_map(TestInterruptSources_ifc);
     irq_map_def("exampleSoCInterrupts");
 
-    TestIRQSource_ifc#(2) i_uart <- mkTestIRQSource;
-    Reg#(Bool) rg_gpio_irq   <- mkReg(False);
-    Reg#(Bool) rg_shared_irq <- mkReg(False);
+    TestIRQSource_ifc#(2) i_uart        <- mkTestIRQSource;
+    Reg#(Bool)            rg_gpio_irq   <- mkReg(False);
+    Reg#(Bool)            rg_shared_irq <- mkReg(False);
 
     irq_map_source(2, "UART0",      i_uart.irqs);
     irq_map_source(3, "SHARED_IRQ", vec(rg_shared_irq));
     irq_map_source(5, "GPIO0",      vec(rg_gpio_irq));
 
     interface uart = i_uart;
-    method gpio_irq = rg_gpio_irq;
-    method set_gpio_irq = rg_gpio_irq._write;
+    method gpio_irq       = rg_gpio_irq;
+    method set_gpio_irq   = rg_gpio_irq._write;
     method set_shared_irq = rg_shared_irq._write;
 endmodule
 
 (* synthesize *)
 module mkTestBlueAddrMap(Empty);
     AddrMap_ifc#(32, TestSocFabric_ifc) map <- create_addr_map(soc_address_map);
-    AddrMapDoc_t doc <- doc_addr_map(soc_address_map);
+    AddrMapDoc_t                        doc <- doc_addr_map(soc_address_map);
     IRQMap_ifc#(8, TestInterruptSources_ifc) interrupts
         <- create_irq_map(soc_irq_map);
 
@@ -201,8 +196,7 @@ module mkTestBlueAddrMap(Empty);
         expect_hit(map.decoder, 'h1001_0004, True, 1, 'h0001_0004);
         expect_hit(map.decoder, 'h2000_0000, False, 0, 0);
 
-        // The bridge forwards the global address. Its own APB map performs the
-        // leaf decode and reports the peripheral-local offset separately.
+        //the bridge forwards the global address. Its own APB map performs the leaf decode and reports the peripheral-local offset separately.
         expect_hit(
             map.internal.peripherals.downstream_decoder,
             'h1001_0004,

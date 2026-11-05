@@ -47,17 +47,17 @@ module [BlueCSRCtx_t#(32, 32)] module_config(ModConfig_ifc);
 
     Reg#(Bit#(1))   rg_sts_rstrb;
     Reg#(Bit#(1))   rg_sts_rstrb2;
-    Wire#(Maybe#(Bool)) w_sts_rxerr_evt <- mkDWire(tagged Invalid);
-    Wire#(Maybe#(Bool)) w_sts_evt       <- mkDWire(tagged Invalid);
-    Wire#(Bool)     w_irq_rx_evt    <- mkDWire(False);
-    Wire#(Bool)     w_irq_tx_evt    <- mkDWire(False);
-    Wire#(Bool)     w_irq_fault_evt <- mkDWire(False);
-    Wire#(Maybe#(Bit#(32))) w_hu_update <- mkDWire(tagged Invalid);
+    Wire#(Maybe#(Bool))     w_sts_rxerr_evt <- mkDWire(tagged Invalid);
+    Wire#(Maybe#(Bool))     w_sts_evt       <- mkDWire(tagged Invalid);
+    Wire#(Bool)             w_irq_rx_evt    <- mkDWire(False);
+    Wire#(Bool)             w_irq_tx_evt    <- mkDWire(False);
+    Wire#(Bool)             w_irq_fault_evt <- mkDWire(False);
+    Wire#(Maybe#(Bit#(32))) w_hu_update     <- mkDWire(tagged Invalid);
 
-    RegFile#(Bit#(8), Bit#(8)) table0 <- mkRegFileFull;
-    FIFOF#(Bit#(8)) fifo_error_read <- mkSizedFIFOF(1);
-    FIFOF#(Bit#(8)) fifo_valid_read <- mkSizedFIFOF(1);
-    FIFOF#(Bit#(8)) fifo_write <- mkSizedFIFOF(1);
+    RegFile#(Bit#(8), Bit#(8)) table0          <- mkRegFileFull;
+    FIFOF#(Bit#(8))            fifo_error_read <- mkSizedFIFOF(1);
+    FIFOF#(Bit#(8))            fifo_valid_read <- mkSizedFIFOF(1);
+    FIFOF#(Bit#(8))            fifo_write      <- mkSizedFIFOF(1);
 
     csr_regmap_def("testBlueCSR", "Test BlueCSR register map");
 
@@ -161,8 +161,8 @@ endmodule
 
 (* synthesize *)
 module mk_config(BlueCSRAccess_ifc#(32, 32, 2, ModConfig_ifc));
-    BlueCSRAccess_ifc#(32, 32, 2, ModConfig_ifc) cfg <- create_blue_csr(module_config, False);
-    BlueCSRExport_ifc rdl_export <- export_systemrdl_blue_csr(module_config, "sim/testBlueCSR.rdl");
+    BlueCSRAccess_ifc#(32, 32, 2, ModConfig_ifc) cfg        <- create_blue_csr(module_config, False);
+    BlueCSRExport_ifc                            rdl_export <- export_systemrdl_blue_csr(module_config, "sim/testBlueCSR.rdl");
 
     RegMapDoc_t#(32) doc <- doc_blue_csr(module_config);
 
@@ -172,7 +172,7 @@ endmodule
 
 module [Module] mkTestBlueCSR(Empty);
 
-    let cfg <- mk_config;
+    let cfg       <- mk_config;
     let tb_lookup <- build_blue_csr_tb_lookup(module_config);
 
     Reg#(Bit#(32)) rg_addr <- mkReg(0);

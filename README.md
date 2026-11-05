@@ -54,6 +54,8 @@ Field definitions:
 - `csr_reg_w1c` creates a write-1-to-clear field with a hardware update value
   represented as `Maybe#(t)`. Valid hardware updates take priority over
   software clearing.
+- `csr_reg_counter` creates an RW counter that adds one in every cycle its event is True. A same-cycle software write is kept and the event is added to it.
+- `csr_reg_counter_ro` creates the same counter as an RO field.
 - `csr_irq` creates an event-latched W1C pending field and its RW enable field, then contributes `pending && enable` to a selected external IRQ line. Multiple fields may OR onto one line, and one map may drive multiple lines.
 - `csr_reg_w1s` creates a write-1-to-set field.
 - `csr_reg_fifo_ro` creates an exclusive, LSB-aligned FIFO read that returns `CSR_SLVERR` when empty. FIFO widths must be byte multiples no wider than the CSR data width.

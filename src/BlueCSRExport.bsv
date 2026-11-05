@@ -9,7 +9,7 @@ import BlueCSRValidation :: *;
 module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
 
     let {_, c} <- getCollection(ctx);
-    let validation = validate_blue_csr_entries(c);
+    let validation  = validate_blue_csr_entries(c);
     let regdefs     = List::concat(List::map(get_reg_def, c));
     let regiondefs  = List::concat(List::map(get_reg_region_def, c));
     let regfields   = List::concat(List::map(get_regfield_def, c));
@@ -77,7 +77,7 @@ module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
     endfunction
 
     function Integer addressWidth();
-        Integer reg_width = List::foldr(max, 1, List::map(regOffsetWidth, regdefs));
+        Integer reg_width    = List::foldr(max, 1, List::map(regOffsetWidth, regdefs));
         Integer region_width = List::foldr(max, 1, List::map(regionAddressWidth, regiondefs));
         return max(reg_width, region_width);
     endfunction
@@ -112,13 +112,13 @@ module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
         Integer field_bits_width        = List::foldr(max, 0, List::map(fieldBitsWidth, regfields));
         Integer field_access_width      = List::foldr(max, 0, List::map(fieldAccessWidth, regfields));
         Integer field_reset_width       = List::foldr(max, 0, List::map(fieldResetWidth, regfields));
-        String field_doc = "";
+        String  field_doc               = "";
         for(Integer fi = 0; fi < length(regfields); fi = fi + 1) begin
             let rf = regfields[fi];
             if(rf.offset == regdef.offset) begin
-                String bits = fieldBits(rf);
+                String bits   = fieldBits(rf);
                 String access = fieldAccess(rf);
-                String reset = fieldReset(rf);
+                String reset  = fieldReset(rf);
                 field_doc = field_doc + "\n  "
                     + padRight(rf.identifier, field_identifier_width)
                     + "  "
@@ -150,9 +150,9 @@ module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
             + regiondef.description;
     endfunction
 
-    String reg_doc = List::foldl(strConcat, "", List::map(strConcat("\n\n"), List::map(doc_reg, regdefs)));
+    String reg_doc    = List::foldl(strConcat, "", List::map(strConcat("\n\n"), List::map(doc_reg, regdefs)));
     String region_doc = List::foldl(strConcat, "", List::map(strConcat("\n\n"), List::map(doc_region, regiondefs)));
-    String map_doc = validation.map_name + " " + validation.map_description;
+    String map_doc    = validation.map_name + " " + validation.map_description;
 
     return RegMapDoc_t {
         reg_defs: validation.valid ? map_doc + reg_doc + region_doc : validation.errors
@@ -163,7 +163,7 @@ endmodule
 module [Module] doc_blue_csr_markdown#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
 
     let {_, c} <- getCollection(ctx);
-    let validation = validate_blue_csr_entries(c);
+    let validation  = validate_blue_csr_entries(c);
     let regdefs     = List::concat(List::map(get_reg_def, c));
     let regiondefs  = List::concat(List::map(get_reg_region_def, c));
     let regfields   = List::concat(List::map(get_regfield_def, c));
@@ -214,7 +214,7 @@ module [Module] doc_blue_csr_markdown#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t
     endfunction
 
     function Integer addressWidth();
-        Integer reg_width = List::foldr(max, 1, List::map(regOffsetWidth, regdefs));
+        Integer reg_width    = List::foldr(max, 1, List::map(regOffsetWidth, regdefs));
         Integer region_width = List::foldr(max, 1, List::map(regionAddressWidth, regiondefs));
         return max(reg_width, region_width);
     endfunction
@@ -259,8 +259,8 @@ module [Module] doc_blue_csr_markdown#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t
     endfunction
 
     function String doc_reg(RegDef_t regdef);
-        String rows = "";
-        Bool found_field = False;
+        String rows        = "";
+        Bool   found_field = False;
         for(Integer fi = 0; fi < length(regfields); fi = fi + 1) begin
             let rf = regfields[fi];
             if(rf.offset == regdef.offset) begin
@@ -283,9 +283,9 @@ module [Module] doc_blue_csr_markdown#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t
             + " |  |  |  |  |  |\n";
     endfunction
 
-    String reg_doc = List::foldl(strConcat, "", List::map(doc_reg, regdefs));
+    String reg_doc    = List::foldl(strConcat, "", List::map(doc_reg, regdefs));
     String region_doc = List::foldl(strConcat, "", List::map(doc_region, regiondefs));
-    String map_doc = validation.map_name + " " + validation.map_description;
+    String map_doc    = validation.map_name + " " + validation.map_description;
 
     return RegMapDoc_t {
         reg_defs: validation.valid ? map_doc + "\n\n" + markdownHeader() + reg_doc + region_doc : validation.errors
@@ -296,7 +296,7 @@ endmodule
 module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String output_path)(BlueCSRExport_ifc);
 
     let {_, c} <- getCollection(ctx);
-    let validation = validate_blue_csr_entries(c);
+    let validation          = validate_blue_csr_entries(c);
     let regdefs             = List::concat(List::map(get_reg_def, c));
     let regiondefs          = List::concat(List::map(get_reg_region_def, c));
     let regfields           = List::concat(List::map(get_regfield_def, c));
@@ -304,10 +304,10 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
     let action_reads        = List::concat(List::map(get_action_read, c));
     let writes              = List::concat(List::map(get_write_op, c));
     let action_writes       = List::concat(List::map(get_action_write, c));
-    let read_regions   = List::concat(List::map(get_read_region, c));
+    let read_regions        = List::concat(List::map(get_read_region, c));
     let write_regions       = List::concat(List::map(get_write_region, c));
 
-    Reg#(Bool) rg_done <- mkReg(False);
+    Reg#(Bool) rg_done    <- mkReg(False);
     Reg#(Bool) rg_success <- mkReg(False);
     Reg#(Bool) rg_started <- mkReg(False);
 
@@ -393,7 +393,7 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
                 end
                 for(Integer ri = 0; ri < length(regiondefs); ri = ri + 1) begin
                     let region = regiondefs[ri];
-                    String sw = get_sw(has_region_read_access(region.offset, region.length), has_region_write_access(region.offset, region.length));
+                    String  sw      = get_sw(has_region_read_access(region.offset, region.length), has_region_write_access(region.offset, region.length));
                     Integer entries = region.length / valueOf(TDiv#(dw, 8));
                     $fwrite(fh, "  mem {\n");
                     $fwrite(fh, "    desc = \"%s\";\n", region.description);
@@ -404,10 +404,10 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
                 end
                 for(Integer ri = 0; ri < length(regdefs); ri = ri + 1) begin
                     let rd = regdefs[ri];
-                    Bool can_read = has_read_access(rd.offset);
-                    Bool can_write = has_write_access(rd.offset);
-                    String sw = get_sw(can_read, can_write);
-                    Bool wrote_field = False;
+                    Bool   can_read    = has_read_access(rd.offset);
+                    Bool   can_write   = has_write_access(rd.offset);
+                    String sw          = get_sw(can_read, can_write);
+                    Bool   wrote_field = False;
 
                     $fwrite(fh, "  reg {\n");
                     $fwrite(fh, "    desc = \"%s\";\n", rd.description);

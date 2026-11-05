@@ -45,20 +45,20 @@ typedef enum {
 } BlueCSRTrigger_t deriving(Bits, Eq, FShow);
 
 typedef struct {
-    Bool wr;
-    Bit#(aw) addr;
-    Bit#(dw) wdata;
+    Bool               wr;
+    Bit#(aw)           addr;
+    Bit#(dw)           wdata;
     Bit#(TDiv#(dw, 8)) wstrb;
-    BlueCSRProt_t prot;
+    BlueCSRProt_t      prot;
 } BlueCSR_Req_t#(numeric type aw, numeric type dw) deriving(Eq, Bits, FShow);
 
 typedef struct {
-    Bit#(dw) rdata;
+    Bit#(dw)          rdata;
     BlueCSRResponse_t resp;
 } BlueCSR_Rsp_t#(numeric type dw) deriving(Eq, Bits, FShow);
 
 typedef struct {
-    Bit#(dw) data;
+    Bit#(dw)           data;
     Bit#(TDiv#(dw, 8)) strobe;
 } CSRRegWrite_t#(numeric type dw) deriving(Bits);
 
@@ -93,46 +93,44 @@ typedef struct {
 
 typedef struct {
     Integer offset;
-    String identifier;
-    String description;
+    String  identifier;
+    String  description;
 } RegDef_t;
 
 typedef struct {
     Integer offset;
     Integer length;
-    String identifier;
-    String description;
+    String  identifier;
+    String  description;
 } RegRegionDef_t;
 
 typedef struct {
-    Integer offset;
-    Integer length;
+    Integer               offset;
+    Integer               length;
     BlueCSRAccessPolicy_t read_policy;
     BlueCSRAccessPolicy_t write_policy;
 } AccessPolicyDef_t;
 
 typedef struct {
-    Integer offset;
-    String identifier;
-    String name;
-    String description;
+    Integer         offset;
+    String          identifier;
+    String          name;
+    String          description;
     BlueCSRAccess_t access_type;
-    Integer bit_offset;
-    Integer width;
-    String reset_value;
+    Integer         bit_offset;
+    Integer         width;
+    String          reset_value;
 } RegFieldDef_t;
 
 typedef struct {
     Integer offs;
-    // Combinational value contribution. Multiple entries at one offset are
-    // OR-composed to form the register word.
+    //combinational value contribution. Multiple entries at one offset are OR-composed to form the register word.
     function Bit#(dw) _() f_read;
 } ReadOpPure_t#(numeric type dw);
 
 typedef struct {
     Integer offs;
-    // Effectful reads are separate because ActionValue methods participate in
-    // BSV scheduling (for example, FIFO reads dequeue an element).
+    //effectful reads are separate because ActionValue methods participate in BSV scheduling (for example, FIFO reads dequeue an element)
     Bool exclusive;
     function Bool _() can_read;
     BlueCSR_Rsp_t#(dw) unavailable_rsp;
@@ -146,7 +144,7 @@ typedef struct {
 
 typedef struct {
     Integer offs;
-    Bool exclusive;
+    Bool    exclusive;
     function Bool _(Bit#(dw) d, Bit#(TDiv#(dw, 8)) s) can_write;
     BlueCSRResponse_t unavailable_resp;
     function ActionValue#(BlueCSRResponse_t) _(Bit#(dw) d, Bit#(TDiv#(dw, 8)) s) f_write;
@@ -166,19 +164,19 @@ typedef struct {
 
 typedef struct {
     Integer offs;
-    Bool delay;
+    Bool    delay;
     function Action _() trigger;
 } ReadTrigger_t;
 
 typedef struct {
     Integer offs;
-    Bool delay;
+    Bool    delay;
     function Action _() trigger;
 } WriteTrigger_t;
 
 typedef struct {
     Integer line;
-    Bool active;
+    Bool    active;
 } IRQSource_t;
 
 typedef union tagged {
@@ -233,7 +231,7 @@ typedef struct {
 } RegMapDoc_t#(numeric type dw);
 
 typedef struct {
-    Bool valid;
+    Bool   valid;
     String errors;
     String map_name;
     String map_description;
@@ -280,6 +278,27 @@ instance Eq#(AccessPolicyDef_t);
     endfunction
 endinstance
 
+//field value after a byte strobed bus write of d onto current
+function t field_value_strobed(t current, Integer field_offs, Bit#(dw) d, Bit#(b__) strobe)
+    provisos(
+        Bits#(t, st),
+        Add#(st, a__, dw),
+        Mul#(b__, 8, dw),
+        Div#(dw, 8, b__)
+    );
+    Bit#(dw)                       cur_word  = cExtend(current) << fromInteger(field_offs);
+    Vector#(TDiv#(dw, 8), Bit#(8)) cur_bytes = unpack(cur_word);
+    Vector#(TDiv#(dw, 8), Bit#(8)) wr_bytes  = unpack(d);
+    for (Integer i = 0; i < valueOf(b__); i = i + 1) begin
+        if(unpack(strobe[i])) begin
+            cur_bytes[i] = wr_bytes[i];
+        end
+    end
+    Bit#(dw) merged_word = pack(cur_bytes);
+    Bit#(st) new_field   = truncate(merged_word >> fromInteger(field_offs));
+    return unpack(new_field);
+endfunction
+
 function Action field_write_strobed(Reg#(t) r, Integer field_offs, Bit#(dw) d, Bit#(b__) strobe)
     provisos(
         Bits#(t, st),
@@ -288,17 +307,7 @@ function Action field_write_strobed(Reg#(t) r, Integer field_offs, Bit#(dw) d, B
         Div#(dw, 8, b__)
     );
     action
-        Bit#(dw) cur_word = cExtend(r) << fromInteger(field_offs);
-        Vector#(TDiv#(dw, 8), Bit#(8)) cur_bytes = unpack(cur_word);
-        Vector#(TDiv#(dw, 8), Bit#(8)) wr_bytes = unpack(d);
-        for (Integer i = 0; i < valueOf(b__); i = i + 1) begin
-            if(unpack(strobe[i])) begin
-                cur_bytes[i] = wr_bytes[i];
-            end
-        end
-        Bit#(dw) merged_word = pack(cur_bytes);
-        Bit#(st) new_field = truncate(merged_word >> fromInteger(field_offs));
-        r <= unpack(new_field);
+        r <= field_value_strobed(r, field_offs, d, strobe);
     endaction
 endfunction
 
@@ -311,7 +320,7 @@ function Action field_w1c(Reg#(t) r, Integer field_offs, Bit#(dw) d, Bit#(b__) s
     );
     action
         Bit#(dw) current = cExtend(r) << fromInteger(field_offs);
-        Bit#(dw) d_clr = current & ~d;
+        Bit#(dw) d_clr   = current & ~d;
         field_write_strobed(r, field_offs, d_clr, strb);
     endaction
 endfunction
@@ -325,7 +334,7 @@ function Action field_w1s(Reg#(t) r, Integer field_offs, Bit#(dw) d, Bit#(b__) s
     );
     action
         Bit#(dw) current = cExtend(r) << fromInteger(field_offs);
-        Bit#(dw) d_set = current | d;
+        Bit#(dw) d_set   = current | d;
         field_write_strobed(r, field_offs, d_set, strb);
     endaction
 endfunction
@@ -415,7 +424,7 @@ function Bool byte_ranges_overlap(Integer a_offs, Integer a_len, Integer b_offs,
 endfunction
 
 function Bool is_power_of_two(Integer value);
-    Bool result = value > 0;
+    Bool    result    = value > 0;
     Integer remaining = value;
     while (remaining > 1) begin
         result = result && ((remaining % 2) == 0);
@@ -460,7 +469,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_regmap_def#(String name, String desc)();
 endmodule
 
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_def#(Integer offs, String ident, String desc)();
-    Integer word_bytes = valueOf(TDiv#(dw, 8));
+    Integer word_bytes    = valueOf(TDiv#(dw, 8));
     Integer address_space = 2 ** valueOf(aw);
     if(offs < 0 || (offs + word_bytes) > address_space) begin
         errorM("BlueCSR register " + ident + " lies outside the CSR address space.");
@@ -478,7 +487,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_def#(Integer offs, String ident, String d
 endmodule
 
 module [BlueCSRCtx_t#(aw, dw)] csr_region_def#(Integer offs, Integer len, String ident, String desc)();
-    Integer word_bytes = valueOf(TDiv#(dw, 8));
+    Integer word_bytes    = valueOf(TDiv#(dw, 8));
     Integer address_space = 2 ** valueOf(aw);
     if(len <= 0) begin
         errorM("BlueCSR region " + ident + " has non-positive length.");
@@ -652,7 +661,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_field#(BlueCSRAccess_t access_type, Integ
     return r;
 endmodule
 
-// Shared implementation for fields whose state remains owned by BlueCSR.
+//shared implementation for fields whose state remains owned by BlueCSR
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_update#(BlueCSRAccess_t access_type, Integer offs, t rv, Integer bitpos, Maybe#(t) hw_update, String ident, String name, String desc)(ReadOnly#(t))
     provisos(
         Bits#(t, sz_t),
@@ -661,8 +670,8 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_update#(BlueCSRAccess_t access_type, Inte
         Mul#(TDiv#(dw, 8), 8, dw),
         Div#(dw, 8, TDiv#(dw, 8))
     );
-    Reg#(t) r <- mkReg(rv);
-    Wire#(Maybe#(t)) w_hardware_upd <- mkDWire(tagged Invalid);
+    Reg#(t)                           r                <- mkReg(rv);
+    Wire#(Maybe#(t))                  w_hardware_upd   <- mkDWire(tagged Invalid);
     Wire#(Maybe#(CSRRegWrite_t#(dw))) w_software_write <- mkDWire(tagged Invalid);
 
     function Bit#(dw) field_rd() = field_read_pure(r, bitpos);
@@ -697,8 +706,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_update#(BlueCSRAccess_t access_type, Inte
     return regToReadOnly(r);
 endmodule
 
-// Read-write fields whose state may be updated by hardware.  A same-cycle
-// hardware update wins over a software write.
+//read-write fields whose state may be updated by hardware. A same-cycle hardware update wins over a software write.
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_hu#(Integer offs, t rv, Integer bitpos, Maybe#(t) hw_update, String ident, String name, String desc)(ReadOnly#(t))
     provisos(
         Bits#(t, sz_t),
@@ -711,7 +719,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_hu#(Integer offs, t rv, Integer bitpos, M
     return r;
 endmodule
 
-// Read-only fields whose state may be updated by hardware.
+//read-only fields whose state may be updated by hardware
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_ho#(Integer offs, t rv, Integer bitpos, Maybe#(t) hw_update, String ident, String name, String desc)(ReadOnly#(t))
     provisos(
         Bits#(t, sz_t),
@@ -807,9 +815,83 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1c#(Integer offs, t rv, Integer bitpos, 
     return r;
 endmodule
 
-// Add one event-latched interrupt field. Software clears PENDING with W1C and
-// controls ENABLE with RW. Multiple fields may contribute to the same line;
-// create_blue_csr OR-composes their enabled pending states.
+//accumulator field whose state remains owned by BlueCSR. Every cycle with a Valid amount adds it (wrapping). A software write replaces the value and a same-cycle amount is added to the written value, so neither the write nor the event is lost (e.g. clearing a counter that counts every cycle).
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_accumulate_access#(BlueCSRAccess_t access_type, Integer offs, t rv, Integer bitpos, Maybe#(t) amount, String ident, String name, String desc)(ReadOnly#(t))
+    provisos(
+        Bits#(t, sz_t),
+        Arith#(t),
+        FieldReadPure#(t, dw),
+        Add#(sz_t, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    Reg#(t)                           r                <- mkReg(rv);
+    Wire#(Maybe#(CSRRegWrite_t#(dw))) w_software_write <- mkDWire(tagged Invalid);
+
+    function Bit#(dw) field_rd() = field_read_pure(r, bitpos);
+    function Bit#(dw) field_const() = field_read_pure(rv, bitpos);
+    function Action write_field(BlueCSRAccess_t write_access, Bit#(dw) d, Bit#(TDiv#(dw, 8)) s);
+        action
+            w_software_write <= tagged Valid CSRRegWrite_t { data: d, strobe: s };
+        endaction
+    endfunction
+
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_accumulate (isValid(amount) || isValid(w_software_write));
+        t value = r;
+        if(w_software_write matches tagged Valid .write) value = field_value_strobed(value, bitpos, write.data, write.strobe);
+        if(amount matches tagged Valid .a) value = value + a;
+        r <= value;
+    endrule
+
+    csr_reg_field_ops(access_type, offs, rv, bitpos, field_rd, field_const, write_field, ident, name, desc);
+
+    return regToReadOnly(r);
+endmodule
+
+//read-write accumulator: software may preset or clear, hardware adds amount
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_accumulate#(Integer offs, t rv, Integer bitpos, Maybe#(t) amount, String ident, String name, String desc)(ReadOnly#(t))
+    provisos(
+        Bits#(t, sz_t),
+        Arith#(t),
+        FieldReadPure#(t, dw),
+        Add#(sz_t, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    let r <- csr_reg_accumulate_access(CSR_RW, offs, rv, bitpos, amount, ident, name, desc);
+    return r;
+endmodule
+
+//read-write event counter: adds one in every cycle the event is True
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_counter#(Integer offs, t rv, Integer bitpos, Bool event_strobe, String ident, String name, String desc)(ReadOnly#(t))
+    provisos(
+        Bits#(t, sz_t),
+        Arith#(t),
+        FieldReadPure#(t, dw),
+        Add#(sz_t, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    let r <- csr_reg_accumulate_access(CSR_RW, offs, rv, bitpos, event_strobe ? tagged Valid 1 : tagged Invalid, ident, name, desc);
+    return r;
+endmodule
+
+//read-only event counter, owned by hardware
+module [BlueCSRCtx_t#(aw, dw)] csr_reg_counter_ro#(Integer offs, t rv, Integer bitpos, Bool event_strobe, String ident, String name, String desc)(ReadOnly#(t))
+    provisos(
+        Bits#(t, sz_t),
+        Arith#(t),
+        FieldReadPure#(t, dw),
+        Add#(sz_t, a__, dw),
+        Mul#(TDiv#(dw, 8), 8, dw),
+        Div#(dw, 8, TDiv#(dw, 8))
+    );
+    let r <- csr_reg_accumulate_access(CSR_RO, offs, rv, bitpos, event_strobe ? tagged Valid 1 : tagged Invalid, ident, name, desc);
+    return r;
+endmodule
+
+//add one event-latched interrupt field. Software clears PENDING with W1C and controls ENABLE with RW. Multiple fields may contribute to the same line; create_blue_csr OR-composes their enabled pending states.
 module [BlueCSRCtx_t#(aw, dw)] csr_irq#(Integer pending_offs, Integer enable_offs, Integer bitpos, Integer line, Bool event_strobe, String ident, String name, String desc)()
     provisos(
         Add#(1, a__, dw),
@@ -853,9 +935,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_w1s#(Integer offs, t rv, Integer bitpos, 
     return r;
 endmodule
 
-// Register action handlers own their state and consume/produce complete bus
-// words. rv and bitpos describe the field for export; they do not mask data,
-// allocate storage, or reset the callback's state. Each direction is exclusive.
+//register action handlers own their state and consume/produce complete bus words. rv and bitpos describe the field for export; they do not mask data, allocate storage, or reset the callback's state. Each direction is exclusive.
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_act_ops#(BlueCSRAccess_t access_type, Integer offs, t rv, Integer bitpos, Bool can_read, BlueCSR_Rsp_t#(dw) unavailable_rsp, function ActionValue#(BlueCSR_Rsp_t#(dw)) read_fn(), function Bool can_write(Bit#(dw) data, Bit#(TDiv#(dw, 8)) strb), BlueCSRResponse_t unavailable_resp, function ActionValue#(BlueCSRResponse_t) write_fn(Bit#(dw) data, Bit#(TDiv#(dw, 8)) strb), String ident, String name, String desc)()
     provisos(
         Bits#(t, sz_t),
@@ -1049,8 +1129,8 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_fifo_wo#(Integer offs, FIFOF#(t) fifo, St
         Mul#(TDiv#(dw, 8), 8, dw),
         Div#(dw, 8, TDiv#(dw, 8))
     );
-    Bit#(TDiv#(sz_t, 8)) fifo_strobes = unpack(-1);
-    Bit#(TDiv#(dw, 8)) required_strobes = zeroExtend(fifo_strobes);
+    Bit#(TDiv#(sz_t, 8)) fifo_strobes     = unpack(-1);
+    Bit#(TDiv#(dw, 8))   required_strobes = zeroExtend(fifo_strobes);
 
     function Bool can_write(Bit#(dw) d, Bit#(TDiv#(dw, 8)) s);
         return (s != required_strobes) || fifo.notFull;
@@ -1298,7 +1378,7 @@ module [Module] create_blue_csr_with_default_response#(
         return (addr & region_mask) == region_base;
     endfunction
 
-    Rules read_rules = emptyRules;
+    Rules read_rules  = emptyRules;
     Rules write_rules = emptyRules;
 
     for (Integer i = 0; i < List::length(regdefs); i = i + 1) begin
@@ -1351,7 +1431,7 @@ module [Module] create_blue_csr_with_default_response#(
         end
         else begin
             read_rules = rJoinMutuallyExclusive(rules
-                // Only the selected callback branch needs its method guards.
+                //only the selected callback branch needs its method guards
                 (* aggressive_implicit_conditions *)
                 rule rread_reg_action_available(!req.wr && req_hit && req_rd_allowed && field_actions[0].can_read);
                     let action_rsp <- field_actions[0].f_read;
@@ -1396,7 +1476,7 @@ module [Module] create_blue_csr_with_default_response#(
         end
         else begin
             write_rules = rJoinMutuallyExclusive(rules
-                // Preserve conditional method guards in write callbacks.
+                //preserve conditional method guards in write callbacks
                 (* aggressive_implicit_conditions *)
                 rule rwrite_reg_action_available(req.wr && req_hit && req_wr_allowed && write_actions[0].can_write(req.wdata, req.wstrb));
                     let action_resp <- write_actions[0].f_write(req.wdata, req.wstrb);

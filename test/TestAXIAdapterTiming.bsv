@@ -27,7 +27,7 @@ endmodule
 
 module [Module] mkTimingDut#(Integer buffer)(TimingDut_ifc);
     BlueCSRAccess_ifc#(32, 32, 0, Empty) csr <- create_blue_csr(timing_csrs, False);
-    BlueCSR_AXI4Lite_ifc#(32, 32, 0) axi <- mkBlueCSRAXI4LiteAdapter(csr.external, buffer, buffer);
+    BlueCSR_AXI4Lite_ifc#(32, 32, 0)     axi <- mkBlueCSRAXI4LiteAdapter(csr.external, buffer, buffer);
     interface s_rd = axi.s_rd;
     interface s_wr = axi.s_wr;
 endmodule
@@ -36,7 +36,7 @@ endmodule
 (* synthesize *)
 module mkTimingDutNarrow(TimingDut_ifc);
     BlueCSRAccess_ifc#(12, 32, 0, Empty) csr <- create_blue_csr(timing_csrs, False);
-    BlueCSR_AXI4Lite_ifc#(32, 32, 0) axi <- mkBlueCSRAXI4LiteAdapter(csr.external, 0, 0);
+    BlueCSR_AXI4Lite_ifc#(32, 32, 0)     axi <- mkBlueCSRAXI4LiteAdapter(csr.external, 0, 0);
     interface s_rd = axi.s_rd;
     interface s_wr = axi.s_wr;
 endmodule
@@ -70,9 +70,9 @@ module mkTimingTester#(TimingDut_ifc dut, String name, Integer latency, Bool nar
     Reg#(Bool)     rg_bready  <- mkReg(True);
 
     //cycle of the last request handshakes; used for latency checks
-    Reg#(UInt#(32)) rg_ar_cycle <- mkReg(0);
-    Reg#(UInt#(32)) rg_aw_cycle <- mkReg(0);
-    Reg#(UInt#(32)) rg_w_cycle  <- mkReg(0);
+    Reg#(UInt#(32)) rg_ar_cycle      <- mkReg(0);
+    Reg#(UInt#(32)) rg_aw_cycle      <- mkReg(0);
+    Reg#(UInt#(32)) rg_w_cycle       <- mkReg(0);
     Reg#(Bool)      rg_check_latency <- mkReg(True);
     Reg#(Bool)      rg_rvalid_prev   <- mkReg(False);
     Reg#(Bool)      rg_bvalid_prev   <- mkReg(False);
@@ -253,7 +253,7 @@ module mkTimingTester#(TimingDut_ifc dut, String name, Integer latency, Bool nar
         rg_done <= True;
     endseq;
 
-    FSM fsm <- mkFSM(s);
+    FSM        fsm        <- mkFSM(s);
     Reg#(Bool) rg_started <- mkReg(False);
 
     rule r_start if(!rg_started);

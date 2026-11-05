@@ -18,11 +18,11 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
     let read_regions        = List::concat(List::map(get_read_region, c));
     let write_regions       = List::concat(List::map(get_write_region, c));
 
-    Integer word_bytes = valueOf(TDiv#(dw, 8));
+    Integer word_bytes    = valueOf(TDiv#(dw, 8));
     Integer address_space = 2 ** valueOf(aw);
 
-    String errors = "";
-    String map_name = "BlueCSR";
+    String errors          = "";
+    String map_name        = "BlueCSR";
     String map_description = "";
 
     if(length(regmap_defs) == 0) begin
@@ -150,12 +150,12 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
     end
 
     for(Integer ri = 0; ri < length(regdefs); ri = ri + 1) begin
-        Integer value_read_count = 0;
-        Integer action_read_count = 0;
-        Integer value_write_count = 0;
+        Integer value_read_count   = 0;
+        Integer action_read_count  = 0;
+        Integer value_write_count  = 0;
         Integer action_write_count = 0;
-        Bool exclusive_read = False;
-        Bool exclusive_write = False;
+        Bool    exclusive_read     = False;
+        Bool    exclusive_write    = False;
 
         for(Integer i = 0; i < length(pure_reads); i = i + 1) begin
             if(pure_reads[i].offs == regdefs[ri].offset) value_read_count = value_read_count + 1;
@@ -204,7 +204,7 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
 
     for(Integer i = 0; i < length(regiondefs); i = i + 1) begin
         let region = regiondefs[i];
-        Bool has_read = False;
+        Bool has_read  = False;
         Bool has_write = False;
         for(Integer j = 0; j < length(read_regions); j = j + 1) begin
             has_read = has_read || ((read_regions[j].offs == region.offset) && (read_regions[j].length == region.length));

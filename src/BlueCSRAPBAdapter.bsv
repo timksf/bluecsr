@@ -3,7 +3,8 @@ package BlueCSRAPBAdapter;
 import GetPut :: *;
 import Vector :: *;
 
-import BlueFabric :: *;
+import Apb :: *;
+import ApbSlave :: *;
 import BlueCSRCore :: *;
 
 (* always_enabled *)
@@ -22,8 +23,8 @@ endfunction
 
 module mkBlueCSRAPBAdapter#(BlueCSR_ifc#(aw, dw, ni) csr, Bool pipeline_request)(BlueCSR_APB_ifc#(aw, dw, user_w, ni));
 
-    ApbSlave_ifc#(aw, dw, user_w) i_apb <- mkApbSlave(pipeline_request);
-    Reg#(Bool) rg_pending <- mkReg(False);
+    ApbSlave_ifc#(aw, dw, user_w) i_apb      <- mkApbSlave(pipeline_request);
+    Reg#(Bool)                    rg_pending <- mkReg(False);
 
     rule r_issue_request if(!rg_pending);
         let request <- i_apb.request.get;

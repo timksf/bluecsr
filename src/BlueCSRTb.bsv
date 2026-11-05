@@ -21,16 +21,16 @@ interface BlueCSRTbAccessor_ifc#(numeric type dw);
 endinterface
 
 typedef struct {
-    List#(RegDef_t) regdefs;
+    List#(RegDef_t)       regdefs;
     List#(RegRegionDef_t) regiondefs;
-    List#(RegFieldDef_t) regfields;
+    List#(RegFieldDef_t)  regfields;
 } BlueCSRTbLookup_t#(numeric type aw, numeric type dw);
 
 module [Module] build_blue_csr_tb_lookup#(BlueCSRCtx_t#(aw, dw, i) ctx)(BlueCSRTbLookup_t#(aw, dw));
     let {_, c} <- getCollection(ctx);
-    let regdefs = List::concat(List::map(get_reg_def, c));
+    let regdefs    = List::concat(List::map(get_reg_def, c));
     let regiondefs = List::concat(List::map(get_reg_region_def, c));
-    let regfields = List::concat(List::map(get_regfield_def, c));
+    let regfields  = List::concat(List::map(get_regfield_def, c));
 
     return BlueCSRTbLookup_t {
         regdefs: regdefs,

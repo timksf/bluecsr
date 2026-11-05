@@ -40,7 +40,7 @@ endmodule
 module mkTestBlueCSRMux(Empty);
     BlueCSRAccess_ifc#(16, 32, 1, ChildIRQ_ifc) child_ro <- create_blue_csr(mux_child_ro, False);
     BlueCSRAccess_ifc#(16, 32, 1, ChildIRQ_ifc) child_rw <- create_blue_csr(mux_child_rw, False);
-    BlueCSRAccess_ifc#(16, 32, 1, ChildIRQ_ifc) flat_ro <- create_blue_csr(mux_child_ro, False);
+    BlueCSRAccess_ifc#(16, 32, 1, ChildIRQ_ifc) flat_ro  <- create_blue_csr(mux_child_ro, False);
 
     Vector#(2, BlueCSRSubmap_t#(16)) submaps = newVector;
     submaps[0] = BlueCSRSubmap_t { base: 'h1000, mask: 'hFF00 };
@@ -50,12 +50,12 @@ module mkTestBlueCSRMux(Empty);
     children[1] = child_rw.external;
     BlueCSR_ifc#(16, 32, 1) csr <- mkBlueCSRMux(submaps, children);
 
-    Reg#(UInt#(32)) cycle <- mkReg(0);
-    Reg#(UInt#(32)) mux_response_cycle <- mkReg(0);
-    Reg#(UInt#(32)) flat_response_cycle <- mkReg(0);
-    Reg#(Bool) latency_request_sent <- mkReg(False);
-    Reg#(Bool) mux_response_seen <- mkReg(False);
-    Reg#(Bool) flat_response_seen <- mkReg(False);
+    Reg#(UInt#(32)) cycle                <- mkReg(0);
+    Reg#(UInt#(32)) mux_response_cycle   <- mkReg(0);
+    Reg#(UInt#(32)) flat_response_cycle  <- mkReg(0);
+    Reg#(Bool)      latency_request_sent <- mkReg(False);
+    Reg#(Bool)      mux_response_seen    <- mkReg(False);
+    Reg#(Bool)      flat_response_seen   <- mkReg(False);
 
     rule count_cycles;
         cycle <= cycle + 1;
