@@ -68,19 +68,6 @@ Action accessors:
 - `csr_reg_act_wo` registers an exclusive action write.
 - `csr_reg_act_rw` registers independent action reads and writes.
 
-Declare the register with `csr_reg_def` first. These helpers allocate no storage.
-`rv` and `bitpos` describe only the field's reset value, width, and position.
-Callbacks operate on full bus words and raw byte strobes, without masking or
-shifting. The caller owns state and reset.
-
-`read_fn()` returns `ActionValue#(BlueCSR_Rsp_t#(dw))`.
-`write_fn(data, strb)` returns `ActionValue#(BlueCSRResponse_t)`.
-`can_read` is a dynamic `Bool`. `can_write(data, strb)` returns `Bool`.
-False readiness returns the supplied unavailable response without invoking the
-callback. Readiness must cover the called methods' guards. Callback execution
-is atomic with request consumption and response enqueue. Returned errors do
-not roll back side effects. Normal access policies apply.
-
 Region accessors:
 - `csr_region_ro` creates a read-only region backed by a read function.
 - `csr_region_wo` creates a write-only region backed by a write function.
