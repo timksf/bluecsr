@@ -17,6 +17,7 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
     let action_writes       = List::concat(List::map(get_action_write, c));
     let read_regions        = List::concat(List::map(get_read_region, c));
     let write_regions       = List::concat(List::map(get_write_region, c));
+    let server_regions      = List::concat(List::map(get_server_region, c));
 
     Integer word_bytes    = valueOf(TDiv#(dw, 8));
     Integer address_space = 2 ** valueOf(aw);
@@ -211,6 +212,9 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
         end
         for(Integer j = 0; j < length(write_regions); j = j + 1) begin
             has_write = has_write || ((write_regions[j].offs == region.offset) && (write_regions[j].length == region.length));
+        end
+        for(Integer j = 0; j < length(server_regions); j = j + 1) begin
+            has_read = has_read || ((server_regions[j].offs == region.offset) && (server_regions[j].length == region.length));
         end
         if(!(has_read || has_write)) begin
             errors = append_newline(errors, "BlueCSR validation failed: region " + region.identifier + " has no bound read or write handler.");
