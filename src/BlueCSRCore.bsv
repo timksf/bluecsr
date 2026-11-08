@@ -8,6 +8,8 @@ import Vector :: *;
 import GetPut :: *;
 import SpecialFIFOs :: *;
 import ModuleCollect :: *;
+import ClientServer :: *;
+import BRAM :: *;
 
 typedef enum {
     CSR_OKAY = 2'b00,
@@ -162,6 +164,15 @@ typedef struct {
     function Action _(Bit#(aw) a, Bit#(dw) d) f_write;
 } WriteRegion_t#(numeric type aw, numeric type dw);
 
+//request/response region: one response per request, in order, from a server with any latency
+typedef struct {
+    Integer                                         offs;
+    Integer                                         length;
+    Bool                                            can_access;
+    BlueCSRResponse_t                               unavailable_resp;
+    Server#(BlueCSR_Req_t#(aw, dw), BlueCSR_Rsp_t#(dw)) server;
+} ServerRegion_t#(numeric type aw, numeric type dw);
+
 typedef struct {
     Integer offs;
     Bool    delay;
@@ -191,6 +202,7 @@ typedef union tagged {
     WriteOpAction_t#(dw)    WriteOpAction;
     ReadRegion_t#(aw, dw)   ReadRegion;
     WriteRegion_t#(aw, dw)  WriteRegion;
+    ServerRegion_t#(aw, dw) ServerRegion;
     ReadTrigger_t           ReadTrigger;
     WriteTrigger_t          WriteTrigger;
     IRQSource_t             IRQSource;
@@ -208,6 +220,8 @@ function List#(ReadRegion_t#(aw, dw)) get_read_region(RegMapEntry_t#(aw, dw) reg
     regmap_entry matches tagged ReadRegion .rr ? Cons(rr, Nil) : Nil;
 function List#(WriteRegion_t#(aw, dw)) get_write_region(RegMapEntry_t#(aw, dw) regmap_entry) =
     regmap_entry matches tagged WriteRegion .rr ? Cons(rr, Nil) : Nil;
+function List#(ServerRegion_t#(aw, dw)) get_server_region(RegMapEntry_t#(aw, dw) regmap_entry) =
+    regmap_entry matches tagged ServerRegion .rr ? Cons(rr, Nil) : Nil;
 function List#(AccessPolicyDef_t) get_access_policy_def(RegMapEntry_t#(aw, dw) regmap_entry) =
     regmap_entry matches tagged AccessPolicyDef .rr ? Cons(rr, Nil) : Nil;
 function List#(RegFieldDef_t) get_regfield_def(RegMapEntry_t#(aw, dw) regmap_entry) =
@@ -1180,6 +1194,72 @@ module [BlueCSRCtx_t#(aw, dw)] csr_region_ro#(Integer offs, Integer len, functio
     Empty _ <- csr_region_def(offs, len, ident, desc);
 endmodule
 
+/*
+ * Region served by a request/response server, e.g. a BRAM. Requests carry the byte address relative to offs,
+ * data, strobes and protection unchanged; the server returns exactly one response per request, in order, after
+ * any latency. Further requests to the map wait for that response. While can_access is False, accesses return
+ * unavailable_resp without reaching the server.
+ */
+module [BlueCSRCtx_t#(aw, dw)] csr_region_server#(Integer offs, Integer len, Bool can_access, BlueCSRResponse_t unavailable_resp, Server#(BlueCSR_Req_t#(aw, dw), BlueCSR_Rsp_t#(dw)) server, String ident, String desc)();
+    RegMapEntry_t#(aw, dw) entry = tagged ServerRegion ServerRegion_t {
+        offs: offs,
+        length: len,
+        can_access: can_access,
+        unavailable_resp: unavailable_resp,
+        server: server
+    };
+    addToCollection(entry);
+    Empty _ <- csr_region_def(offs, len, ident, desc);
+endmodule
+
+/*
+ * Region backed by a standard BRAM server port (BRAM1Port.portA, BRAM2Port.portA/B), one element per CSR word.
+ * The element sits at bit 0 of the word. A write needs the strobes of every byte the element occupies; no strobes
+ * make it a no-op, partial strobes return CSR_SLVERR. The BRAM is used with responseOnWrite False.
+ */
+module [BlueCSRCtx_t#(aw, dw)] csr_region_bram#(Integer offs, Integer len, Bool can_access, BlueCSRResponse_t unavailable_resp, BRAMServer#(addr_t, t) bram, String ident, String desc)()
+    provisos(
+        Bits#(addr_t, addr_w),
+        Bits#(t, t_w),
+        Add#(t_w, a__, dw)
+    );
+    Integer t_bytes  = (valueOf(t_w) + 7) / 8;
+    Integer word_lsb = log2(valueOf(TDiv#(dw, 8)));
+
+    FIFOF#(Maybe#(BlueCSRResponse_t)) f_pending <- mkSizedFIFOF(1);
+
+    Server#(BlueCSR_Req_t#(aw, dw), BlueCSR_Rsp_t#(dw)) server = interface Server;
+        interface Put request;
+            method Action put(BlueCSR_Req_t#(aw, dw) req);
+                Bit#(TDiv#(dw, 8)) element_strb = fromInteger(2 ** t_bytes - 1);
+                Bool               full         = (req.wstrb & element_strb) == element_strb;
+                Bool               none         = (req.wstrb & element_strb) == 0;
+                addr_t             address      = unpack(cExtend(req.addr >> word_lsb));
+                if(!req.wr) begin
+                    bram.request.put(BRAMRequest { write: False, responseOnWrite: False, address: address, datain: ? });
+                    f_pending.enq(tagged Invalid);
+                end
+                else begin
+                    if(full) bram.request.put(BRAMRequest { write: True, responseOnWrite: False, address: address, datain: unpack(truncate(req.wdata)) });
+                    f_pending.enq(tagged Valid (full || none ? CSR_OKAY : CSR_SLVERR));
+                end
+            endmethod
+        endinterface
+        interface Get response;
+            method ActionValue#(BlueCSR_Rsp_t#(dw)) get;
+                f_pending.deq;
+                if(f_pending.first matches tagged Valid .resp)
+                    return BlueCSR_Rsp_t { rdata: 0, resp: resp };
+                else begin
+                    let x <- bram.response.get;
+                    return BlueCSR_Rsp_t { rdata: zeroExtend(pack(x)), resp: CSR_OKAY };
+                end
+            endmethod
+        endinterface
+    endinterface;
+
+    csr_region_server(offs, len, can_access, unavailable_resp, server, ident, desc);
+endmodule
 
 module [BlueCSRCtx_t#(aw, dw)] csr_reg_trig#(Integer offs, Bool delay, BlueCSRTrigger_t rw)(Reg#(Bit#(1)))
     provisos(
@@ -1306,6 +1386,7 @@ module [Module] create_blue_csr_with_default_response#(
     let write_ops       = List::concat(List::map(get_write_op, c));
     let action_writes   = List::concat(List::map(get_action_write, c));
     let write_regions   = List::concat(List::map(get_write_region, c));
+    let server_regions  = List::concat(List::map(get_server_region, c));
     let read_triggers   = List::concat(List::map(get_read_trigger, c));
     let write_triggers  = List::concat(List::map(get_write_trigger, c));
     let irq_sources     = List::concat(List::map(get_irq_source, c));
@@ -1555,9 +1636,53 @@ module [Module] create_blue_csr_with_default_response#(
         end
     end
 
+    //a server access holds its request in f_req until the response returns, so no other rule can match it
+    Bool server_busy = False;
+    for (Integer i = 0; i < List::length(server_regions); i = i + 1) begin
+        let region          = server_regions[i];
+        let region_policies = find_policies_by_offs(access_policies, region.offs, region.length);
+        let read_policy     = List::length(region_policies) > 0 ? region_policies[0].read_policy : CSR_ALLOW_ALL;
+        let write_policy    = List::length(region_policies) > 0 ? region_policies[0].write_policy : CSR_ALLOW_ALL;
+
+        Reg#(Bool) rg_waiting <- mkReg(False);
+        server_busy = server_busy || rg_waiting;
+
+        let req             = f_req.first;
+        let local_req       = req;
+        local_req.addr      = req.addr - fromInteger(region.offs);
+        let req_hit         = is_region_addr(req.addr, region.offs, region.length) && is_word_aligned(req.addr);
+        let req_rd_allowed  = access_policy_allows(read_policy,  req.prot);
+        let req_wr_allowed  = access_policy_allows(write_policy, req.prot);
+
+        //reads and writes join the rule group of their direction, like registers and regions above
+        function Rules server_rules(Bool dir_hit) = rules
+            //servers may call their own subcomponents conditionally
+            (* aggressive_implicit_conditions *)
+            rule rserver_region_request(!rg_waiting && dir_hit && region.can_access);
+                region.server.request.put(local_req);
+                rg_waiting <= True;
+            endrule
+            rule rserver_region_unavailable(!rg_waiting && dir_hit && !region.can_access);
+                f_rsp.enq(BlueCSR_Rsp_t { rdata: 0, resp: region.unavailable_resp });
+                f_req.deq;
+            endrule
+            //the request stays at the head of f_req until its response returns
+            (* aggressive_implicit_conditions *)
+            rule rserver_region_response(rg_waiting && dir_hit);
+                let rsp <- region.server.response.get;
+                f_rsp.enq(rsp);
+                f_req.deq;
+                rg_waiting <= False;
+            endrule
+        endrules;
+
+        read_rules  = rJoinMutuallyExclusive(server_rules(!req.wr && req_hit && req_rd_allowed), read_rules);
+        write_rules = rJoinMutuallyExclusive(server_rules(req.wr && req_hit && req_wr_allowed), write_rules);
+    end
+
     read_rules = rJoinDescendingUrgency(read_rules,
         rules
-            rule rread_default(!f_req.first.wr); //only fires if a request is available
+            rule rread_default(!f_req.first.wr && !server_busy); //only fires if a request is available
                 f_rsp.enq(
                     BlueCSR_Rsp_t {
                         rdata:  0,
@@ -1571,7 +1696,7 @@ module [Module] create_blue_csr_with_default_response#(
 
     write_rules = rJoinDescendingUrgency(write_rules,
         rules
-            rule rwrite_default(f_req.first.wr);
+            rule rwrite_default(f_req.first.wr && !server_busy);
                 f_rsp.enq(
                     BlueCSR_Rsp_t {
                         rdata:  0,

@@ -85,6 +85,12 @@ Region accessors:
 - `csr_region_ro` creates a read-only region backed by a read function.
 - `csr_region_wo` creates a write-only region backed by a write function.
 - `csr_region_rw` creates a read-write region backed by read and write functions.
+- `csr_region_server` creates a region backed by a `Server` of `BlueCSR_Req_t`/`BlueCSR_Rsp_t`. Requests carry the
+  region-relative byte address, data, strobes and protection; the server returns one response per request, in order,
+  after any latency. The map holds later requests until that response. While `can_access` is False, accesses return
+  the supplied response without reaching the server.
+- `csr_region_bram` serves a region from a standard `BRAMServer` port (one element per word, at bit 0). Writes need the
+  strobes of every element byte; no strobes are a no-op, partial strobes return `CSR_SLVERR`.
 
 Hardware access triggers:
 - `csr_reg_trig` creates a hardware-only trigger bit on read, write, or both, with optional delayed pulse generation.
