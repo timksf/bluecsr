@@ -10,6 +10,7 @@ import SpecialFIFOs :: *;
 import ModuleCollect :: *;
 import ClientServer :: *;
 import BRAM :: *;
+import DefaultValue :: *;
 
 import BlueCSRTypes :: *;
 import BlueCSRValidation :: *;
@@ -1158,11 +1159,21 @@ endinterface
 typedef BusAccess_ifc#(BlueCSR_Fab_ifc#(aw, dw), int_ifc)   BlueCSRAccess_Fab_ifc#(numeric type aw, numeric type dw, type int_ifc);
 typedef BusAccess_ifc#(BlueCSR_ifc#(aw, dw, ni), int_ifc)   BlueCSRAccess_ifc#(numeric type aw, numeric type dw, numeric type ni, type int_ifc);
 
-module [Module] create_blue_csr_with_default_response#(
-    BlueCSRCtx_t#(aw, dw, i) ctx,
-    Bool buffer_in,
-    BlueCSRResponse_t default_response
-)(BlueCSRAccess_ifc#(aw, dw, ni, i));
+//buffer_in: requests are registered before decode; buffer_out: responses are registered, so no
+//combinational path runs from the request through decode to the consumer; both add one cycle
+typedef struct {
+    Bool              buffer_in;
+    Bool              buffer_out;
+    BlueCSRResponse_t default_response;
+} BlueCSRCfg_t deriving(Bits, Eq, FShow);
+
+instance DefaultValue#(BlueCSRCfg_t);
+    defaultValue = BlueCSRCfg_t { buffer_in: False, buffer_out: False, default_response: CSR_DECERR };
+endinstance
+
+module [Module] create_blue_csr_cfg#(BlueCSRCtx_t#(aw, dw, i) ctx, BlueCSRCfg_t cfg)(BlueCSRAccess_ifc#(aw, dw, ni, i));
+    Bool              buffer_in        = cfg.buffer_in;
+    BlueCSRResponse_t default_response = cfg.default_response;
 
     let {coll_device_ifc, c} <- getCollection(ctx);
     let validation = validate_blue_csr_entries(c);
@@ -1194,7 +1205,11 @@ module [Module] create_blue_csr_with_default_response#(
     end
 
     FIFOF#(BlueCSR_Req_t#(aw, dw))  f_req;
-    FIFOF#(BlueCSR_Rsp_t#(dw))      f_rsp <- mkBypassFIFOF;
+    FIFOF#(BlueCSR_Rsp_t#(dw))      f_rsp;
+    if(cfg.buffer_out)
+        f_rsp <- mkFIFOF;
+    else
+        f_rsp <- mkBypassFIFOF;
 
     //the requests are still buffered with the bypass fifo 
     //but only when there is no space in the output. Otherwise, the
@@ -1523,8 +1538,17 @@ module [Module] create_blue_csr_with_default_response#(
     interface internal = coll_device_ifc;
 endmodule
 
+module [Module] create_blue_csr_with_default_response#(
+    BlueCSRCtx_t#(aw, dw, i) ctx,
+    Bool buffer_in,
+    BlueCSRResponse_t default_response
+)(BlueCSRAccess_ifc#(aw, dw, ni, i));
+    let csr <- create_blue_csr_cfg(ctx, BlueCSRCfg_t { buffer_in: buffer_in, buffer_out: False, default_response: default_response });
+    return csr;
+endmodule
+
 module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, Bool buffer_in)(BlueCSRAccess_ifc#(aw, dw, ni, i));
-    let csr <- create_blue_csr_with_default_response(ctx, buffer_in, CSR_DECERR);
+    let csr <- create_blue_csr_cfg(ctx, BlueCSRCfg_t { buffer_in: buffer_in, buffer_out: False, default_response: CSR_DECERR });
     return csr;
 endmodule
 
