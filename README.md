@@ -31,6 +31,7 @@ different result should add an explicit handler for that access.
 
 #### Bluespec API
 - `BlueCSRCtx_t` collection context used to build a CSR map and return internal module state.
+- `csr_block(base, size, prefix, child)` includes a child map in an aligned, power-of-two byte window and returns its internal interface. Register and region identifiers get `prefix + "_"`; an empty prefix leaves them unchanged. Blocks can nest.
 - `csr_regmap_def` adds the top-level CSR map name and description.
 - `csr_reg_def` declares a register at a byte offset.
 - `csr_reg_prot` sets read and write access policy for a single register-sized entry.
@@ -89,7 +90,7 @@ Triggers do not add software-visible fields or documentation metadata. Describe
 their effects in the associated register description.
 
 Runtime and export:
-- `create_blue_csr` builds the live BlueCSR interface from a `BlueCSRCtx_t` definition. Its inferred `ni` parameter configures the external IRQ vector width.
+- `create_blue_csr` builds the live BlueCSR interface from a `BlueCSRCtx_t` definition. It validates the map and fails elaboration on errors, including a missing or duplicate `csr_regmap_def`. Its inferred `ni` parameter configures the external IRQ vector width.
 - `create_blue_csr_with_default_response` builds the same interface and lets
   the caller choose the response when no more-specific access rule can fire.
   The legacy constructor remains equivalent to selecting `CSR_DECERR`.
@@ -118,3 +119,9 @@ AXI4-Lite adapter API:
 APB adapter API:
 - `mkBlueCSRAPBAdapter` bridges a `BlueCSR_ifc` instance to a BlueFabric APB slave interface.
 - `BlueCSR_APB_ifc#(aw, dw, user_w, ni)` contains the APB slave interface and forwards the CSR interrupt vector upstream.
+
+#### Combining maps
+
+Use `csr_block` to place child maps at offsets while sharing one decoder and request/response FIFO pair. Map definitions must be available at elaboration time and use the same `aw` and `dw`.
+
+Use `mkBlueCSRMux` for existing `BlueCSR_ifc` instances, different address widths, or a separate decode stage. A map assembled with `csr_block` can also be a mux child.

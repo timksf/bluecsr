@@ -13,7 +13,11 @@ typedef struct {
     Bit#(aw) mask;
 } BlueCSRSubmap_t#(numeric type aw) deriving(Bits, Eq, FShow);
 
-//route one transaction at a time to a child CSR map. A child matches when (address & mask) == (base & mask), and receives an address relative to base. If windows overlap, the lowest vector index has priority. Requests and responses are routed directly. The response FIFO is fall-through: it stores a response only when the upstream consumer applies backpressure.
+/*
+ * Routes one transaction at a time to a child CSR map, selected by (address & mask) == (base & mask).
+ * Overlapping windows select the lowest vector index. Child requests use addresses relative to the selected base.
+ * Requests and responses pass through directly. The response FIFO buffers only under upstream backpressure.
+ */
 module mkBlueCSRMux#(Vector#(n, BlueCSRSubmap_t#(aw)) submaps, Vector#(n, BlueCSR_ifc#(aw, dw, ni)) children)(BlueCSR_ifc#(aw, dw, ni))
     provisos(Add#(1, n_minus_one, n));
 

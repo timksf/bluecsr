@@ -3,7 +3,7 @@ package BlueCSRValidation;
 import List :: *;
 import ModuleCollect :: *;
 
-import BlueCSRCore :: *;
+import BlueCSRTypes :: *;
 
 function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, dw)) c);
     let regmap_defs         = List::concat(List::map(get_regmap_def, c));
@@ -35,6 +35,38 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
     else begin
         map_name = regmap_defs[0].name;
         map_description = regmap_defs[0].description;
+    end
+
+    //ancestors may contain descendants; completed scopes must be disjoint
+    List#(RegBlockDef_t) active_blocks    = Nil;
+    List#(RegBlockDef_t) completed_blocks = Nil;
+    for(Integer bi = 0; bi < length(c); bi = bi + 1) begin
+        case (c[bi]) matches
+            tagged RegBlockDef .block_def: begin
+                if(block_def.offset < 0 || block_def.length <= 0 || (block_def.offset + block_def.length) > address_space) begin
+                    errors = append_newline(errors, "BlueCSR validation failed: block " + block_def.prefix + " lies outside the CSR address space.");
+                end
+                if(!List::isNull(active_blocks)) begin
+                    let parent = List::head(active_blocks);
+                    if(block_def.offset < parent.offset || (block_def.offset + block_def.length) > (parent.offset + parent.length)) begin
+                        errors = append_newline(errors, "BlueCSR validation failed: block " + block_def.prefix + " lies outside parent block " + parent.prefix + ".");
+                    end
+                end
+                for(Integer bj = 0; bj < length(completed_blocks); bj = bj + 1) begin
+                    let other = completed_blocks[bj];
+                    if(byte_ranges_overlap(block_def.offset, block_def.length, other.offset, other.length)) begin
+                        errors = append_newline(errors, "BlueCSR validation failed: blocks " + other.prefix + " and " + block_def.prefix + " overlap.");
+                    end
+                end
+                active_blocks = Cons(block_def, active_blocks);
+            end
+            tagged RegBlockEnd: begin
+                if(!List::isNull(active_blocks)) begin
+                    completed_blocks = Cons(List::head(active_blocks), completed_blocks);
+                    active_blocks    = List::tail(active_blocks);
+                end
+            end
+        endcase
     end
 
     for(Integer ri = 0; ri < length(regdefs); ri = ri + 1) begin
@@ -127,26 +159,26 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
     end
 
     for(Integer i = 0; i < length(pure_reads); i = i + 1) begin
-        if(count_regdefs_at(regdefs, pure_reads[i].offs) != 1) begin
-            errors = append_newline(errors, "BlueCSR validation failed: pure read at offset 0x" + integerToString(pure_reads[i].offs) + " does not resolve to exactly one csr_reg_def.");
+        if(count_regdefs_at(regdefs, pure_reads[i].offset) != 1) begin
+            errors = append_newline(errors, "BlueCSR validation failed: pure read at offset 0x" + integerToString(pure_reads[i].offset) + " does not resolve to exactly one csr_reg_def.");
         end
     end
 
     for(Integer i = 0; i < length(action_reads); i = i + 1) begin
-        if(count_regdefs_at(regdefs, action_reads[i].offs) != 1) begin
-            errors = append_newline(errors, "BlueCSR validation failed: action read at offset 0x" + integerToString(action_reads[i].offs) + " does not resolve to exactly one csr_reg_def.");
+        if(count_regdefs_at(regdefs, action_reads[i].offset) != 1) begin
+            errors = append_newline(errors, "BlueCSR validation failed: action read at offset 0x" + integerToString(action_reads[i].offset) + " does not resolve to exactly one csr_reg_def.");
         end
     end
 
     for(Integer i = 0; i < length(writes); i = i + 1) begin
-        if(count_regdefs_at(regdefs, writes[i].offs) != 1) begin
-            errors = append_newline(errors, "BlueCSR validation failed: write op at offset 0x" + integerToString(writes[i].offs) + " does not resolve to exactly one csr_reg_def.");
+        if(count_regdefs_at(regdefs, writes[i].offset) != 1) begin
+            errors = append_newline(errors, "BlueCSR validation failed: write op at offset 0x" + integerToString(writes[i].offset) + " does not resolve to exactly one csr_reg_def.");
         end
     end
 
     for(Integer i = 0; i < length(action_writes); i = i + 1) begin
-        if(count_regdefs_at(regdefs, action_writes[i].offs) != 1) begin
-            errors = append_newline(errors, "BlueCSR validation failed: action write at offset 0x" + integerToString(action_writes[i].offs) + " does not resolve to exactly one csr_reg_def.");
+        if(count_regdefs_at(regdefs, action_writes[i].offset) != 1) begin
+            errors = append_newline(errors, "BlueCSR validation failed: action write at offset 0x" + integerToString(action_writes[i].offset) + " does not resolve to exactly one csr_reg_def.");
         end
     end
 
@@ -159,19 +191,19 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
         Bool    exclusive_write    = False;
 
         for(Integer i = 0; i < length(pure_reads); i = i + 1) begin
-            if(pure_reads[i].offs == regdefs[ri].offset) value_read_count = value_read_count + 1;
+            if(pure_reads[i].offset == regdefs[ri].offset) value_read_count = value_read_count + 1;
         end
         for(Integer i = 0; i < length(action_reads); i = i + 1) begin
-            if(action_reads[i].offs == regdefs[ri].offset) begin
+            if(action_reads[i].offset == regdefs[ri].offset) begin
                 action_read_count = action_read_count + 1;
                 exclusive_read = exclusive_read || action_reads[i].exclusive;
             end
         end
         for(Integer i = 0; i < length(writes); i = i + 1) begin
-            if(writes[i].offs == regdefs[ri].offset) value_write_count = value_write_count + 1;
+            if(writes[i].offset == regdefs[ri].offset) value_write_count = value_write_count + 1;
         end
         for(Integer i = 0; i < length(action_writes); i = i + 1) begin
-            if(action_writes[i].offs == regdefs[ri].offset) begin
+            if(action_writes[i].offset == regdefs[ri].offset) begin
                 action_write_count = action_write_count + 1;
                 exclusive_write = exclusive_write || action_writes[i].exclusive;
             end
@@ -192,14 +224,14 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
     end
 
     for(Integer i = 0; i < length(read_regions); i = i + 1) begin
-        if(count_regions_exact(regiondefs, read_regions[i].offs, read_regions[i].length) != 1) begin
-            errors = append_newline(errors, "BlueCSR validation failed: pure read region at offset 0x" + integerToString(read_regions[i].offs) + " does not resolve to exactly one csr_region_def.");
+        if(count_regions_exact(regiondefs, read_regions[i].offset, read_regions[i].length) != 1) begin
+            errors = append_newline(errors, "BlueCSR validation failed: pure read region at offset 0x" + integerToString(read_regions[i].offset) + " does not resolve to exactly one csr_region_def.");
         end
     end
 
     for(Integer i = 0; i < length(write_regions); i = i + 1) begin
-        if(count_regions_exact(regiondefs, write_regions[i].offs, write_regions[i].length) != 1) begin
-            errors = append_newline(errors, "BlueCSR validation failed: write region at offset 0x" + integerToString(write_regions[i].offs) + " does not resolve to exactly one csr_region_def.");
+        if(count_regions_exact(regiondefs, write_regions[i].offset, write_regions[i].length) != 1) begin
+            errors = append_newline(errors, "BlueCSR validation failed: write region at offset 0x" + integerToString(write_regions[i].offset) + " does not resolve to exactly one csr_region_def.");
         end
     end
 
@@ -208,13 +240,13 @@ function RegMapValidation_t validate_blue_csr_entries(List#(RegMapEntry_t#(aw, d
         Bool has_read  = False;
         Bool has_write = False;
         for(Integer j = 0; j < length(read_regions); j = j + 1) begin
-            has_read = has_read || ((read_regions[j].offs == region.offset) && (read_regions[j].length == region.length));
+            has_read = has_read || ((read_regions[j].offset == region.offset) && (read_regions[j].length == region.length));
         end
         for(Integer j = 0; j < length(write_regions); j = j + 1) begin
-            has_write = has_write || ((write_regions[j].offs == region.offset) && (write_regions[j].length == region.length));
+            has_write = has_write || ((write_regions[j].offset == region.offset) && (write_regions[j].length == region.length));
         end
         for(Integer j = 0; j < length(server_regions); j = j + 1) begin
-            has_read = has_read || ((server_regions[j].offs == region.offset) && (server_regions[j].length == region.length));
+            has_read = has_read || ((server_regions[j].offset == region.offset) && (server_regions[j].length == region.length));
         end
         if(!(has_read || has_write)) begin
             errors = append_newline(errors, "BlueCSR validation failed: region " + region.identifier + " has no bound read or write handler.");
