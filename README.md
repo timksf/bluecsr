@@ -94,6 +94,7 @@ Runtime and export:
 - `create_blue_csr_with_default_response` builds the same interface and lets
   the caller choose the response when no more-specific access rule can fire.
   The legacy constructor remains equivalent to selecting `CSR_DECERR`.
+- `create_blue_csr_cfg(ctx, cfg)` takes a `BlueCSRCfg_t` with `buffer_in`, `buffer_out` and `default_response` (`defaultValue`: no buffers, `CSR_DECERR`). `buffer_in` registers requests before decode. `buffer_out` registers responses, so no combinational path runs from a request through decode into the response consumer, use it when the CSR core limits timing. Each adds one cycle. The other two constructors leave `buffer_out` off.
 - `doc_blue_csr` renders a human-readable register map summary.
 - `doc_blue_csr_markdown` renders the register map as a Markdown table.
 - `export_systemrdl_blue_csr` writes the register map out as SystemRDL.
@@ -113,7 +114,7 @@ AXI4-Lite adapter API:
 - `BlueCSR_AXI4Lite_ifc#(aw, dw, ni)` contains the AXI4-Lite read/write slave interfaces and forwards the same interrupt vector.
 - The adapter serves one transaction at a time and prefers reads. AR, AW and W each have a one-entry holding register. All outputs are registered.
 - `axi4_rd_buffer` / `axi4_wr_buffer`: `0` gives a response one cycle after the handshake. Values above `0` register the request first and give two cycles.
-- `create_blue_csr(..., True)` adds another cycle.
+- `buffer_in` and `buffer_out` on the CSR core each add another cycle.
 - The CSR address width may be smaller than the AXI address width. Upper address bits are ignored, so the interconnect must decode them. The AXI width cannot be inferred from the CSR core, so declare the adapter's interface type.
 
 APB adapter API:

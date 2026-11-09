@@ -145,8 +145,9 @@ module [BlueCSRCtx_t#(16, 32)] block_top_regs(BlockTop_ifc);
     interface b = i_b;
 endmodule
 
-module [Module] mkBlockTest#(Bool buffer_in, Bool use_mux)(ReadOnly#(Bool));
-    BlueCSRAccess_ifc#(16, 32, 1, BlockTop_ifc) i_regs   <- create_blue_csr(block_top_regs, buffer_in);
+module [Module] mkBlockTest#(Bool buffer_in, Bool buffer_out, Bool use_mux)(ReadOnly#(Bool));
+    BlueCSRCfg_t                                cfg      = BlueCSRCfg_t { buffer_in: buffer_in, buffer_out: buffer_out, default_response: CSR_DECERR };
+    BlueCSRAccess_ifc#(16, 32, 1, BlockTop_ifc) i_regs   <- create_blue_csr_cfg(block_top_regs, cfg);
     BlueCSR_ifc#(16, 32, 1)                     csr      = i_regs.external;
     Integer                                     bus_base = use_mux ? 'h8000 : 0;
 
@@ -173,7 +174,7 @@ module [Module] mkBlockTest#(Bool buffer_in, Bool use_mux)(ReadOnly#(Bool));
         action
             let rsp <- csr.response.get;
             if(rsp.rdata != data || rsp.resp != resp) begin
-                $display("FAIL: block buffer=%0d mux=%0d expected=%h/%0d got=%h/%0d", buffer_in, use_mux, data, resp, rsp.rdata, rsp.resp);
+                $display("FAIL: block in=%0d out=%0d mux=%0d expected=%h/%0d got=%h/%0d", buffer_in, buffer_out, use_mux, data, resp, rsp.rdata, rsp.resp);
                 $finish(1);
             end
         endaction
@@ -193,11 +194,11 @@ module [Module] mkBlockTest#(Bool buffer_in, Bool use_mux)(ReadOnly#(Bool));
         access(False, 'h404, 0,          3,          CSR_OKAY);
         access(True,  'h404, 'h87654321, 0,          CSR_OKAY);
         access(False, 'h404, 0,          'h87654321, CSR_OKAY);
-        $display("PASS: two child maps and unchanged parent entries buffer=%0d mux=%0d", buffer_in, use_mux);
+        $display("PASS: two child maps and unchanged parent entries in=%0d out=%0d mux=%0d", buffer_in, buffer_out, use_mux);
 
         request(False, 'h100, 0, CSR_INSECURE);
         check_response(0, CSR_DECERR);
-        $display("PASS: shifted register policy buffer=%0d mux=%0d", buffer_in, use_mux);
+        $display("PASS: shifted register policy in=%0d out=%0d mux=%0d", buffer_in, buffer_out, use_mux);
 
         access(False, 'h118, 0, 0, CSR_OKAY);
         access(True,  'h118, 0, 0, CSR_OKAY);
@@ -207,7 +208,7 @@ module [Module] mkBlockTest#(Bool buffer_in, Bool use_mux)(ReadOnly#(Bool));
                 $finish(1);
             end
         endaction
-        $display("PASS: shifted triggers buffer=%0d mux=%0d", buffer_in, use_mux);
+        $display("PASS: shifted triggers in=%0d out=%0d mux=%0d", buffer_in, buffer_out, use_mux);
 
         access(True,  'h14c, 'h1000, 0, CSR_OKAY);
         action
@@ -219,11 +220,11 @@ module [Module] mkBlockTest#(Bool buffer_in, Bool use_mux)(ReadOnly#(Bool));
         access(False, 'h154, 0, 'h1014, CSR_OKAY);
         request(False, 'h154, 0, CSR_INSECURE);
         check_response(0, CSR_DECERR);
-        $display("PASS: region-relative callbacks and policy buffer=%0d mux=%0d", buffer_in, use_mux);
+        $display("PASS: region-relative callbacks and policy in=%0d out=%0d mux=%0d", buffer_in, buffer_out, use_mux);
 
         access(True,  'h184, 'h2000, 0,      CSR_OKAY);
         access(False, 'h19c, 0,      'h201c, CSR_OKAY);
-        $display("PASS: region-relative server buffer=%0d mux=%0d", buffer_in, use_mux);
+        $display("PASS: region-relative server in=%0d out=%0d mux=%0d", buffer_in, buffer_out, use_mux);
 
         i_regs.internal.a.irq_event(True);
         access(True, 'h114, 1, 0, CSR_OKAY);
@@ -240,15 +241,15 @@ module [Module] mkBlockTest#(Bool buffer_in, Bool use_mux)(ReadOnly#(Bool));
                 $finish(1);
             end
         endaction
-        $display("PASS: child IRQ buffer=%0d mux=%0d", buffer_in, use_mux);
+        $display("PASS: child IRQ in=%0d out=%0d mux=%0d", buffer_in, buffer_out, use_mux);
 
         access(False, 'h300, 0, 0, CSR_DECERR);
         access(True,  'h300, 1, 0, CSR_DECERR);
-        $display("PASS: gap decode errors buffer=%0d mux=%0d", buffer_in, use_mux);
+        $display("PASS: gap decode errors in=%0d out=%0d mux=%0d", buffer_in, buffer_out, use_mux);
 
         access(True,  'h480, 'habcdef01, 0,          CSR_OKAY);
         access(False, 'h480, 0,          'habcdef01, CSR_OKAY);
-        $display("PASS: nested action register buffer=%0d mux=%0d", buffer_in, use_mux);
+        $display("PASS: nested action register in=%0d out=%0d mux=%0d", buffer_in, buffer_out, use_mux);
         action
             if(i_regs.internal.b.leaf != 'habcdef01 || i_regs.internal.b.value != 'h87654321) begin
                 $display("FAIL: returned child interface does not expose bus-written values");
@@ -259,11 +260,11 @@ module [Module] mkBlockTest#(Bool buffer_in, Bool use_mux)(ReadOnly#(Bool));
         endaction
         access(False, 'h100, 0, 'h76543210, CSR_OKAY);
         access(False, 'h480, 0, 'h11223344, CSR_OKAY);
-        $display("PASS: returned child interfaces buffer=%0d mux=%0d", buffer_in, use_mux);
+        $display("PASS: returned child interfaces in=%0d out=%0d mux=%0d", buffer_in, buffer_out, use_mux);
 
         access(False, 'h600, 0, 'hfeed, CSR_OKAY);
         access(False, 'h700, 0, 'hfeed, CSR_OKAY);
-        $display("PASS: empty prefix and children without map metadata buffer=%0d mux=%0d", buffer_in, use_mux);
+        $display("PASS: empty prefix and children without map metadata in=%0d out=%0d mux=%0d", buffer_in, buffer_out, use_mux);
         rg_done <= True;
     endseq;
     FSM        i_fsm      <- mkFSM(test);
@@ -278,9 +279,11 @@ endmodule
 
 (* synthesize *)
 module mkTestBlueCSRBlock(Empty);
-    let i_direct   <- mkBlockTest(False, False);
-    let i_buffered <- mkBlockTest(True, False);
-    let i_mux      <- mkBlockTest(False, True);
+    let i_direct   <- mkBlockTest(False, False, False);
+    let i_buffered <- mkBlockTest(True,  False, False);
+    let i_out      <- mkBlockTest(False, True,  False);
+    let i_both     <- mkBlockTest(True,  True,  True);
+    let i_mux      <- mkBlockTest(False, False, True);
 
     RegMapDoc_t#(32)  markdown  <- doc_blue_csr_markdown(block_top_regs);
     RegMapDoc_t#(32)  text_doc  <- doc_blue_csr(block_top_regs);
@@ -295,7 +298,7 @@ module mkTestBlueCSRBlock(Empty);
             $finish(1);
         end
     endrule
-    rule r_finish(i_direct && i_buffered && i_mux && i_export.done);
+    rule r_finish(i_direct && i_buffered && i_out && i_both && i_mux && i_export.done);
         if(!i_export.success) begin
             $display("FAIL: block SystemRDL export");
             $finish(1);
