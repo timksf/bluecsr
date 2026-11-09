@@ -10,6 +10,7 @@ module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
 
     let {_, c} <- getCollection(ctx);
     let validation  = validate_blue_csr_entries(c);
+    let blockdefs   = List::concat(List::map(get_reg_block_def, c));
     let regdefs     = List::concat(List::map(get_reg_def, c));
     let regiondefs  = List::concat(List::map(get_reg_region_def, c));
     let regfields   = List::concat(List::map(get_regfield_def, c));
@@ -150,12 +151,17 @@ module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
             + regiondef.description;
     endfunction
 
+    function String doc_block(RegBlockDef_t block_def);
+        return "BLOCK " + formatAddress(block_def.offset) + ":" + formatAddress(block_def.offset + block_def.length - 1) + " prefix=" + block_def.prefix + " " + block_def.name + " " + block_def.description;
+    endfunction
+
+    String block_doc  = List::foldl(strConcat, "", List::map(strConcat("\n\n"), List::map(doc_block, blockdefs)));
     String reg_doc    = List::foldl(strConcat, "", List::map(strConcat("\n\n"), List::map(doc_reg, regdefs)));
     String region_doc = List::foldl(strConcat, "", List::map(strConcat("\n\n"), List::map(doc_region, regiondefs)));
     String map_doc    = validation.map_name + " " + validation.map_description;
 
     return RegMapDoc_t {
-        reg_defs: validation.valid ? map_doc + reg_doc + region_doc : validation.errors
+        reg_defs: validation.valid ? map_doc + block_doc + reg_doc + region_doc : validation.errors
     };
 
 endmodule
@@ -164,6 +170,7 @@ module [Module] doc_blue_csr_markdown#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t
 
     let {_, c} <- getCollection(ctx);
     let validation  = validate_blue_csr_entries(c);
+    let blockdefs   = List::concat(List::map(get_reg_block_def, c));
     let regdefs     = List::concat(List::map(get_reg_def, c));
     let regiondefs  = List::concat(List::map(get_reg_region_def, c));
     let regfields   = List::concat(List::map(get_regfield_def, c));
@@ -283,12 +290,17 @@ module [Module] doc_blue_csr_markdown#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t
             + " |  |  |  |  |  |\n";
     endfunction
 
+    function String doc_block(RegBlockDef_t block_def);
+        return "| " + formatAddress(block_def.offset) + ":" + formatAddress(block_def.offset + block_def.length - 1) + " | " + block_def.prefix + " | " + block_def.name + " | " + block_def.description + " |\n";
+    endfunction
+
+    String block_doc  = List::isNull(blockdefs) ? "" : "| Block Address | Prefix | Name | Description |\n" + "| --- | --- | --- | --- |\n" + List::foldl(strConcat, "", List::map(doc_block, blockdefs)) + "\n";
     String reg_doc    = List::foldl(strConcat, "", List::map(doc_reg, regdefs));
     String region_doc = List::foldl(strConcat, "", List::map(doc_region, regiondefs));
     String map_doc    = validation.map_name + " " + validation.map_description;
 
     return RegMapDoc_t {
-        reg_defs: validation.valid ? map_doc + "\n\n" + markdownHeader() + reg_doc + region_doc : validation.errors
+        reg_defs: validation.valid ? map_doc + "\n\n" + block_doc + markdownHeader() + reg_doc + region_doc : validation.errors
     };
 
 endmodule
@@ -314,10 +326,10 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
     function Bool has_read_access(Integer offs);
         Bool found = False;
         for(Integer i = 0; i < length(pure_reads); i = i + 1) begin
-            found = found || pure_reads[i].offs == offs;
+            found = found || pure_reads[i].offset == offs;
         end
         for(Integer i = 0; i < length(action_reads); i = i + 1) begin
-            found = found || action_reads[i].offs == offs;
+            found = found || action_reads[i].offset == offs;
         end
         return found;
     endfunction
@@ -325,10 +337,10 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
     function Bool has_write_access(Integer offs);
         Bool found = False;
         for(Integer i = 0; i < length(writes); i = i + 1) begin
-            found = found || writes[i].offs == offs;
+            found = found || writes[i].offset == offs;
         end
         for(Integer i = 0; i < length(action_writes); i = i + 1) begin
-            found = found || action_writes[i].offs == offs;
+            found = found || action_writes[i].offset == offs;
         end
         return found;
     endfunction
@@ -336,7 +348,7 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
     function Bool has_region_read_access(Integer offs, Integer len);
         Bool found = False;
         for(Integer i = 0; i < length(read_regions); i = i + 1) begin
-            found = found || ((read_regions[i].offs == offs) && (read_regions[i].length == len));
+            found = found || ((read_regions[i].offset == offs) && (read_regions[i].length == len));
         end
         return found;
     endfunction
@@ -344,7 +356,7 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
     function Bool has_region_write_access(Integer offs, Integer len);
         Bool found = False;
         for(Integer i = 0; i < length(write_regions); i = i + 1) begin
-            found = found || ((write_regions[i].offs == offs) && (write_regions[i].length == len));
+            found = found || ((write_regions[i].offset == offs) && (write_regions[i].length == len));
         end
         return found;
     endfunction

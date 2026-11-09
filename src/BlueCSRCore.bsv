@@ -11,250 +11,11 @@ import ModuleCollect :: *;
 import ClientServer :: *;
 import BRAM :: *;
 
-typedef enum {
-    CSR_OKAY = 2'b00,
-    CSR_EXOKAY = 2'b01,
-    CSR_SLVERR = 2'b10,
-    CSR_DECERR = 2'b11
-} BlueCSRResponse_t deriving(Bits, Eq, FShow);
+import BlueCSRTypes :: *;
+import BlueCSRValidation :: *;
 
-typedef enum {
-    CSR_RW,
-    CSR_RO,
-    CSR_RC,
-    CSR_WC,
-    CSR_WS,
-    CSR_WO,
-    CSR_W1S,
-    CSR_W1C
-} BlueCSRAccess_t deriving(Bits, Eq, FShow);
-
-typedef enum {
-    CSR_SECURE = 1'b0,
-    CSR_INSECURE = 1'b1
-} BlueCSRProt_t deriving(Bits, Eq, FShow);
-
-typedef enum {
-    CSR_ALLOW_ALL,
-    CSR_SEC_SECURE_ONLY,
-    CSR_SEC_INSECURE_ONLY
-} BlueCSRAccessPolicy_t deriving(Bits, Eq, FShow);
-
-typedef enum {
-    TRIG_RO,
-    TRIG_WO,
-    TRIG_RW
-} BlueCSRTrigger_t deriving(Bits, Eq, FShow);
-
-typedef struct {
-    Bool               wr;
-    Bit#(aw)           addr;
-    Bit#(dw)           wdata;
-    Bit#(TDiv#(dw, 8)) wstrb;
-    BlueCSRProt_t      prot;
-} BlueCSR_Req_t#(numeric type aw, numeric type dw) deriving(Eq, Bits, FShow);
-
-typedef struct {
-    Bit#(dw)          rdata;
-    BlueCSRResponse_t resp;
-} BlueCSR_Rsp_t#(numeric type dw) deriving(Eq, Bits, FShow);
-
-typedef struct {
-    Bit#(dw)           data;
-    Bit#(TDiv#(dw, 8)) strobe;
-} CSRRegWrite_t#(numeric type dw) deriving(Bits);
-
-(*always_enabled*)
-interface BlueCSR_Fab_ifc#(numeric type aw, numeric type dw);
-    (*prefix = ""*) method Action valid ((*port = "i_valid"*)   Bit#(1)             valid   );
-    (*prefix = ""*) method Action wr    ((*port = "i_wr"*)      Bit#(1)             wr      );
-    (*prefix = ""*) method Action addr  ((*port = "i_addr"*)    Bit#(aw)            addr    );
-    (*prefix = ""*) method Action wdata ((*port = "i_data"*)    Bit#(dw)            data    );
-    (*prefix = ""*) method Action wstrb ((*port = "i_strb"*)    Bit#(TDiv#(dw, 8))  strb    );
-    (*prefix = ""*) method Action prot  ((*port = "i_prot"*)    BlueCSRProt_t       prot    );
-
-    (*result = "o_rdy"*)    method Bit#(1)              ready;
-    (*result = "o_data"*)   method Bit#(dw)             rdata;
-    (*result = "o_resp"*)   method BlueCSRResponse_t    resp;
-endinterface
-
-interface BlueCSR_ifc#(numeric type aw, numeric type dw, numeric type ni);
-    //no pure server to allow easy expansion of this interface
-    interface Put#(BlueCSR_Req_t#(aw, dw))  request;
-    interface Get#(BlueCSR_Rsp_t#(dw))      response;
-    (* always_ready *)
-    method Vector#(ni, Bool) irqs;
-endinterface
-
-typedef ModuleCollect#(RegMapEntry_t#(aw, dw), ifc) BlueCSRCtx_t#(numeric type aw, numeric type dw, type ifc);
-
-typedef struct {
-    String name;
-    String description;
-} RegMapDef_t;
-
-typedef struct {
-    Integer offset;
-    String  identifier;
-    String  description;
-} RegDef_t;
-
-typedef struct {
-    Integer offset;
-    Integer length;
-    String  identifier;
-    String  description;
-} RegRegionDef_t;
-
-typedef struct {
-    Integer               offset;
-    Integer               length;
-    BlueCSRAccessPolicy_t read_policy;
-    BlueCSRAccessPolicy_t write_policy;
-} AccessPolicyDef_t;
-
-typedef struct {
-    Integer         offset;
-    String          identifier;
-    String          name;
-    String          description;
-    BlueCSRAccess_t access_type;
-    Integer         bit_offset;
-    Integer         width;
-    String          reset_value;
-} RegFieldDef_t;
-
-typedef struct {
-    Integer offs;
-    //combinational value contribution. Multiple entries at one offset are OR-composed to form the register word.
-    function Bit#(dw) _() f_read;
-} ReadOpPure_t#(numeric type dw);
-
-typedef struct {
-    Integer offs;
-    //effectful reads are separate because ActionValue methods participate in BSV scheduling (for example, FIFO reads dequeue an element)
-    Bool exclusive;
-    function Bool _() can_read;
-    BlueCSR_Rsp_t#(dw) unavailable_rsp;
-    function ActionValue#(BlueCSR_Rsp_t#(dw)) _() f_read;
-} ReadOpAction_t#(numeric type dw);
-
-typedef struct {
-    Integer offs;
-    function Action _(Bit#(dw) d, Bit#(TDiv#(dw, 8)) s) f_write;
-} WriteOp_t#(numeric type dw);
-
-typedef struct {
-    Integer offs;
-    Bool    exclusive;
-    function Bool _(Bit#(dw) d, Bit#(TDiv#(dw, 8)) s) can_write;
-    BlueCSRResponse_t unavailable_resp;
-    function ActionValue#(BlueCSRResponse_t) _(Bit#(dw) d, Bit#(TDiv#(dw, 8)) s) f_write;
-} WriteOpAction_t#(numeric type dw);
-
-typedef struct {
-    Integer offs;
-    Integer length;
-    function Bit#(dw) _(Bit#(aw) a) f_read;
-} ReadRegion_t#(numeric type aw, numeric type dw);
-
-typedef struct {
-    Integer offs;
-    Integer length;
-    function Action _(Bit#(aw) a, Bit#(dw) d) f_write;
-} WriteRegion_t#(numeric type aw, numeric type dw);
-
-//request/response region: one response per request, in order, from a server with any latency
-typedef struct {
-    Integer                                         offs;
-    Integer                                         length;
-    Bool                                            can_access;
-    BlueCSRResponse_t                               unavailable_resp;
-    Server#(BlueCSR_Req_t#(aw, dw), BlueCSR_Rsp_t#(dw)) server;
-} ServerRegion_t#(numeric type aw, numeric type dw);
-
-typedef struct {
-    Integer offs;
-    Bool    delay;
-    function Action _() trigger;
-} ReadTrigger_t;
-
-typedef struct {
-    Integer offs;
-    Bool    delay;
-    function Action _() trigger;
-} WriteTrigger_t;
-
-typedef struct {
-    Integer line;
-    Bool    active;
-} IRQSource_t;
-
-typedef union tagged {
-    RegMapDef_t             RegMapDef;
-    RegDef_t                RegDef;
-    RegRegionDef_t          RegRegionDef;
-    AccessPolicyDef_t       AccessPolicyDef;
-    RegFieldDef_t           RegFieldDef;
-    ReadOpPure_t#(dw)       ReadOpPure;
-    ReadOpAction_t#(dw)     ReadOpAction;
-    WriteOp_t#(dw)          WriteOp;
-    WriteOpAction_t#(dw)    WriteOpAction;
-    ReadRegion_t#(aw, dw)   ReadRegion;
-    WriteRegion_t#(aw, dw)  WriteRegion;
-    ServerRegion_t#(aw, dw) ServerRegion;
-    ReadTrigger_t           ReadTrigger;
-    WriteTrigger_t          WriteTrigger;
-    IRQSource_t             IRQSource;
-} RegMapEntry_t#(numeric type aw, numeric type dw);
-
-function List#(ReadOpPure_t#(dw)) get_pure_read(RegMapEntry_t#(aw, dw) regmap_entry) =
-    regmap_entry matches tagged ReadOpPure .rr ? Cons(rr, Nil) : Nil;
-function List#(ReadOpAction_t#(dw)) get_action_read(RegMapEntry_t#(aw, dw) regmap_entry) =
-    regmap_entry matches tagged ReadOpAction .rr ? Cons(rr, Nil) : Nil;
-function List#(WriteOp_t#(dw)) get_write_op(RegMapEntry_t#(aw, dw) regmap_entry) =
-    regmap_entry matches tagged WriteOp .rr ? Cons(rr, Nil) : Nil;
-function List#(WriteOpAction_t#(dw)) get_action_write(RegMapEntry_t#(aw, dw) regmap_entry) =
-    regmap_entry matches tagged WriteOpAction .rr ? Cons(rr, Nil) : Nil;
-function List#(ReadRegion_t#(aw, dw)) get_read_region(RegMapEntry_t#(aw, dw) regmap_entry) =
-    regmap_entry matches tagged ReadRegion .rr ? Cons(rr, Nil) : Nil;
-function List#(WriteRegion_t#(aw, dw)) get_write_region(RegMapEntry_t#(aw, dw) regmap_entry) =
-    regmap_entry matches tagged WriteRegion .rr ? Cons(rr, Nil) : Nil;
-function List#(ServerRegion_t#(aw, dw)) get_server_region(RegMapEntry_t#(aw, dw) regmap_entry) =
-    regmap_entry matches tagged ServerRegion .rr ? Cons(rr, Nil) : Nil;
-function List#(AccessPolicyDef_t) get_access_policy_def(RegMapEntry_t#(aw, dw) regmap_entry) =
-    regmap_entry matches tagged AccessPolicyDef .rr ? Cons(rr, Nil) : Nil;
-function List#(RegFieldDef_t) get_regfield_def(RegMapEntry_t#(aw, dw) regmap_entry) =
-    regmap_entry matches tagged RegFieldDef .rr ? Cons(rr, Nil) : Nil;
-function List#(RegDef_t) get_reg_def(RegMapEntry_t#(aw, dw) regmap_entry) =
-    regmap_entry matches tagged RegDef .rr ? Cons(rr, Nil) : Nil;
-function List#(RegRegionDef_t) get_reg_region_def(RegMapEntry_t#(aw, dw) regmap_entry) =
-    regmap_entry matches tagged RegRegionDef .rr ? Cons(rr, Nil) : Nil;
-function List#(RegMapDef_t) get_regmap_def(RegMapEntry_t#(aw, dw) regmap_entry) =
-    regmap_entry matches tagged RegMapDef .rr ? Cons(rr, Nil) : Nil;
-function List#(ReadTrigger_t) get_read_trigger(RegMapEntry_t#(aw, dw) regmap_entry) =
-    regmap_entry matches tagged ReadTrigger .rr ? Cons(rr, Nil) : Nil;
-function List#(WriteTrigger_t) get_write_trigger(RegMapEntry_t#(aw, dw) regmap_entry) =
-    regmap_entry matches tagged WriteTrigger .rr ? Cons(rr, Nil) : Nil;
-function List#(IRQSource_t) get_irq_source(RegMapEntry_t#(aw, dw) regmap_entry) =
-    regmap_entry matches tagged IRQSource .irq ? Cons(irq, Nil) : Nil;
-
-
-typedef struct {
-    String reg_defs;
-} RegMapDoc_t#(numeric type dw);
-
-typedef struct {
-    Bool   valid;
-    String errors;
-    String map_name;
-    String map_description;
-} RegMapValidation_t;
-
-interface BlueCSRExport_ifc;
-    method Bool done;
-    method Bool success;
-endinterface
+export BlueCSRTypes :: *;
+export BlueCSRCore :: *;
 
 typeclass FieldReadPure#(type src, numeric type dw);
     function Bit#(dw) field_read_pure(src s, Integer field_offs);
@@ -402,11 +163,6 @@ function Integer bit_to_integer(Bit#(n) x);
     return res;
 endfunction
 
-function String append_newline(String acc, String msg);
-    if(acc == "") return msg;
-    else return acc + "\n" + msg;
-endfunction
-
 function Bool access_policy_allows(BlueCSRAccessPolicy_t policy, BlueCSRProt_t prot);
     return case (policy)
         CSR_ALLOW_ALL: True;
@@ -415,64 +171,97 @@ function Bool access_policy_allows(BlueCSRAccessPolicy_t policy, BlueCSRProt_t p
     endcase;
 endfunction
 
-function Integer count_regdefs_at(List#(RegDef_t) regdefs, Integer offs);
-    Integer count = 0;
-    for (Integer i = 0; i < length(regdefs); i = i + 1) begin
-        if(regdefs[i].offset == offs) begin
-            count = count + 1;
-        end
-    end
-    return count;
-endfunction
-
-function Bool field_ranges_overlap(RegFieldDef_t a, RegFieldDef_t b);
-    Integer a_lo = a.bit_offset;
-    Integer a_hi = a.bit_offset + a.width;
-    Integer b_lo = b.bit_offset;
-    Integer b_hi = b.bit_offset + b.width;
-    return (a_lo < b_hi) && (b_lo < a_hi);
-endfunction
-
-function Bool byte_ranges_overlap(Integer a_offs, Integer a_len, Integer b_offs, Integer b_len);
-    return (a_offs < (b_offs + b_len)) && (b_offs < (a_offs + a_len));
-endfunction
-
-function Bool is_power_of_two(Integer value);
-    Bool    result    = value > 0;
-    Integer remaining = value;
-    while (remaining > 1) begin
-        result = result && ((remaining % 2) == 0);
-        remaining = remaining / 2;
-    end
-    return result;
-endfunction
-
-function Integer count_regions_exact(List#(RegRegionDef_t) regions, Integer offs, Integer len);
-    Integer count = 0;
-    for (Integer i = 0; i < length(regions); i = i + 1) begin
-        if((regions[i].offset == offs) && (regions[i].length == len)) begin
-            count = count + 1;
-        end
-    end
-    return count;
-endfunction
-
-function Integer count_access_policies_exact(List#(AccessPolicyDef_t) policies, Integer offs, Integer len);
-    Integer count = 0;
-    for (Integer i = 0; i < length(policies); i = i + 1) begin
-        if((policies[i].offset == offs) && (policies[i].length == len)) begin
-            count = count + 1;
-        end
-    end
-    return count;
-endfunction
-
 function String integerToHexDigitS(Integer n) = charToString(integerToHexDigit(n));
 
 function String integerToHex(Integer n);
     if(n < 16) return integerToHexDigitS(n);
     else return strConcat(integerToHex(n / 16), integerToHexDigitS(n % 16));
 endfunction
+
+function String csr_prefix_identifier(String prefix, String identifier);
+    return prefix == "" ? identifier : prefix + "_" + identifier;
+endfunction
+
+function List#(RegMapEntry_t#(aw, dw)) csr_rebase_entry(Integer base, String prefix, RegMapEntry_t#(aw, dw) e);
+    case(e) matches
+        tagged RegMapDef       .entry: return Nil;
+        tagged RegDef          .entry: begin let r = entry; r.offset = r.offset + base; r.identifier = csr_prefix_identifier(prefix, r.identifier); return Cons(tagged RegDef           r, Nil); end
+        tagged RegRegionDef    .entry: begin let r = entry; r.offset = r.offset + base; r.identifier = csr_prefix_identifier(prefix, r.identifier); return Cons(tagged RegRegionDef     r, Nil); end
+        tagged AccessPolicyDef .entry: begin let r = entry; r.offset = r.offset + base;                                                             return Cons(tagged AccessPolicyDef  r, Nil); end
+        tagged RegFieldDef     .entry: begin let r = entry; r.offset = r.offset + base;                                                             return Cons(tagged RegFieldDef      r, Nil); end
+        tagged ReadOpPure      .entry: begin let r = entry; r.offset = r.offset + base;                                                             return Cons(tagged ReadOpPure       r, Nil); end
+        tagged ReadOpAction    .entry: begin let r = entry; r.offset = r.offset + base;                                                             return Cons(tagged ReadOpAction     r, Nil); end
+        tagged WriteOp         .entry: begin let r = entry; r.offset = r.offset + base;                                                             return Cons(tagged WriteOp          r, Nil); end
+        tagged WriteOpAction   .entry: begin let r = entry; r.offset = r.offset + base;                                                             return Cons(tagged WriteOpAction    r, Nil); end
+        tagged ReadTrigger     .entry: begin let r = entry; r.offset = r.offset + base;                                                             return Cons(tagged ReadTrigger      r, Nil); end
+        tagged WriteTrigger    .entry: begin let r = entry; r.offset = r.offset + base;                                                             return Cons(tagged WriteTrigger     r, Nil); end
+        tagged ReadRegion      .entry: begin let r = entry; r.offset = r.offset + base;                                                             return Cons(tagged ReadRegion       r, Nil); end
+        tagged WriteRegion     .entry: begin let r = entry; r.offset = r.offset + base;                                                             return Cons(tagged WriteRegion      r, Nil); end
+        tagged ServerRegion    .entry: begin let r = entry; r.offset = r.offset + base;                                                             return Cons(tagged ServerRegion     r, Nil); end
+        tagged RegBlockDef     .entry: begin let r = entry; r.offset = r.offset + base; r.prefix = csr_prefix_identifier(prefix, r.prefix);         return Cons(tagged RegBlockDef      r, Nil); end
+        default                      : return Cons(e, Nil);
+    endcase
+endfunction
+
+function Bool csr_entry_fits(Integer size, RegMapEntry_t#(aw, dw) e);
+    Integer offs = 0;
+    Integer len  = 0;
+    case(e) matches
+        tagged RegDef          .entry: begin offs = entry.offset; len = valueOf(TDiv#(dw, 8));  end
+        tagged RegRegionDef    .entry: begin offs = entry.offset; len = entry.length;           end
+        tagged AccessPolicyDef .entry: begin offs = entry.offset; len = entry.length;           end
+        tagged RegFieldDef     .entry: begin offs = entry.offset; len = valueOf(TDiv#(dw, 8));  end
+        tagged ReadOpPure      .entry: begin offs = entry.offset; len = valueOf(TDiv#(dw, 8));  end
+        tagged ReadOpAction    .entry: begin offs = entry.offset; len = valueOf(TDiv#(dw, 8));  end
+        tagged WriteOp         .entry: begin offs = entry.offset; len = valueOf(TDiv#(dw, 8));  end
+        tagged WriteOpAction   .entry: begin offs = entry.offset; len = valueOf(TDiv#(dw, 8));  end
+        tagged ReadTrigger     .entry: begin offs = entry.offset; len = valueOf(TDiv#(dw, 8));  end
+        tagged WriteTrigger    .entry: begin offs = entry.offset; len = valueOf(TDiv#(dw, 8));  end
+        tagged ReadRegion      .entry: begin offs = entry.offset; len = entry.length;           end
+        tagged WriteRegion     .entry: begin offs = entry.offset; len = entry.length;           end
+        tagged ServerRegion    .entry: begin offs = entry.offset; len = entry.length;           end
+        tagged RegBlockDef     .entry: begin offs = entry.offset; len = entry.length;           end
+    endcase
+    return offs >= 0 && len >= 0 && (offs + len) <= size;
+endfunction
+
+module [BlueCSRCtx_t#(aw, dw)] csr_block#(Integer base, Integer size, String prefix, BlueCSRCtx_t#(aw, dw, i) child)(i);
+    String label = "BlueCSR block " + prefix + ": ";
+    //lift errors so discarded child interfaces cannot suppress them
+    if(!is_power_of_two(size)) begin
+        liftModule(errorM(label + "size must be a power of two."));
+    end
+    else if(base < 0 || (base + size) > 2 ** valueOf(aw)) begin
+        liftModule(errorM(label + "range lies outside the CSR address space."));
+    end
+    else if((base % size) != 0) begin
+        liftModule(errorM(label + "base must be aligned to size."));
+    end
+
+    let {ifc, entries} <- liftModule(getCollection(child));
+    let map_defs = List::concat(List::map(get_regmap_def, entries));
+    if(List::length(map_defs) > 1) begin
+        liftModule(errorM(label + "child has more than one csr_regmap_def."));
+    end
+    for(Integer ei = 0; ei < List::length(entries); ei = ei + 1) begin
+        if(!csr_entry_fits(size, entries[ei])) begin
+            liftModule(errorM(label + "child entry lies outside [0, " + integerToString(size) + ")."));
+        end
+    end
+
+    RegMapEntry_t#(aw, dw) block_entry = tagged RegBlockDef RegBlockDef_t {
+        offset:      base,
+        length:      size,
+        prefix:      prefix,
+        name:        List::isNull(map_defs) ? prefix : map_defs[0].name,
+        description: List::isNull(map_defs) ? "" : map_defs[0].description
+    };
+    addToCollection(block_entry);
+    List::mapM_(addToCollection, List::concat(List::map(csr_rebase_entry(base, prefix), entries)));
+    RegMapEntry_t#(aw, dw) block_end = tagged RegBlockEnd;
+    addToCollection(block_end);
+    return ifc;
+endmodule
 
 module [BlueCSRCtx_t#(aw, dw)] csr_regmap_def#(String name, String desc)();
     RegMapEntry_t#(aw, dw) entry = tagged RegMapDef RegMapDef_t {
@@ -555,8 +344,8 @@ module [BlueCSRCtx_t#(aw, dw)] csr_region_wo#(Integer offs, Integer len, functio
         endaction
     endfunction
     RegMapEntry_t#(aw, dw) write_region_entry = tagged WriteRegion WriteRegion_t {
-        offs: offs,
-        length: len,
+        offset:  offs,
+        length:  len,
         f_write: do_write
     };
     addToCollection(write_region_entry);
@@ -573,14 +362,14 @@ module [BlueCSRCtx_t#(aw, dw)] csr_region_rw#(Integer offs, Integer len, functio
         endaction
     endfunction
     RegMapEntry_t#(aw, dw) read_region_entry = tagged ReadRegion ReadRegion_t {
-        offs: offs,
+        offset: offs,
         length: len,
         f_read: do_read
     };
     addToCollection(read_region_entry);
     RegMapEntry_t#(aw, dw) write_region_entry = tagged WriteRegion WriteRegion_t {
-        offs: offs,
-        length: len,
+        offset:  offs,
+        length:  len,
         f_write: do_write
     };
     addToCollection(write_region_entry);
@@ -633,8 +422,8 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_field_ops#(BlueCSRAccess_t access_type, I
         end
     endcase
 
-    RegMapEntry_t#(aw, dw) read_entry  = tagged ReadOpPure ReadOpPure_t { offs: offs, f_read: do_read };
-    RegMapEntry_t#(aw, dw) write_entry = tagged WriteOp WriteOp_t { offs: offs, f_write: do_write };
+    RegMapEntry_t#(aw, dw) read_entry  = tagged ReadOpPure ReadOpPure_t { offset: offs, f_read: do_read };
+    RegMapEntry_t#(aw, dw) write_entry = tagged WriteOp WriteOp_t { offset: offs, f_write: do_write };
     RegMapEntry_t#(aw, dw) field_entry = tagged RegFieldDef RegFieldDef_t {
         offset: offs,
         identifier: ident,
@@ -968,7 +757,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_act_ops#(BlueCSRAccess_t access_type, Int
 
     if(access_type != CSR_WO) begin
         RegMapEntry_t#(aw, dw) read_entry = tagged ReadOpAction ReadOpAction_t {
-            offs:            offs,
+            offset:          offs,
             exclusive:       True,
             can_read:        read_available,
             unavailable_rsp: unavailable_rsp,
@@ -978,7 +767,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_act_ops#(BlueCSRAccess_t access_type, Int
     end
     if(access_type != CSR_RO) begin
         RegMapEntry_t#(aw, dw) write_entry = tagged WriteOpAction WriteOpAction_t {
-            offs:             offs,
+            offset:           offs,
             exclusive:        True,
             can_write:        can_write,
             unavailable_resp: unavailable_resp,
@@ -1059,11 +848,11 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_fifo_ro#(Integer offs, FIFOF#(t) fifo, St
     endfunction
 
     RegMapEntry_t#(aw, dw) read_entry = tagged ReadOpAction ReadOpAction_t {
-        offs: offs,
-        exclusive: True,
-        can_read: can_read,
+        offset:          offs,
+        exclusive:       True,
+        can_read:        can_read,
         unavailable_rsp: BlueCSR_Rsp_t { rdata: 0, resp: CSR_SLVERR },
-        f_read: do_read
+        f_read:          do_read
     };
     RegMapEntry_t#(aw, dw) field_entry = tagged RegFieldDef RegFieldDef_t {
         offset: offs,
@@ -1101,11 +890,11 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_fifo_ro_valid#(Integer offs, FIFOF#(t) fi
     endfunction
 
     RegMapEntry_t#(aw, dw) read_entry = tagged ReadOpAction ReadOpAction_t {
-        offs: offs,
-        exclusive: False,
-        can_read: can_read,
+        offset:          offs,
+        exclusive:       False,
+        can_read:        can_read,
         unavailable_rsp: BlueCSR_Rsp_t { rdata: 0, resp: CSR_OKAY },
-        f_read: do_read
+        f_read:          do_read
     };
     RegMapEntry_t#(aw, dw) data_field_entry = tagged RegFieldDef RegFieldDef_t {
         offset: offs,
@@ -1160,11 +949,11 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_fifo_wo#(Integer offs, FIFOF#(t) fifo, St
     endfunction
 
     RegMapEntry_t#(aw, dw) write_entry = tagged WriteOpAction WriteOpAction_t {
-        offs: offs,
-        exclusive: True,
-        can_write: can_write,
+        offset:           offs,
+        exclusive:        True,
+        can_write:        can_write,
         unavailable_resp: CSR_SLVERR,
-        f_write: do_write
+        f_write:          do_write
     };
     RegMapEntry_t#(aw, dw) field_entry = tagged RegFieldDef RegFieldDef_t {
         offset: offs,
@@ -1186,7 +975,7 @@ module [BlueCSRCtx_t#(aw, dw)] csr_region_ro#(Integer offs, Integer len, functio
         return read_fn(local_addr);
     endfunction
     RegMapEntry_t#(aw, dw) read_region_entry = tagged ReadRegion ReadRegion_t {
-        offs: offs,
+        offset: offs,
         length: len,
         f_read: do_read
     };
@@ -1202,11 +991,11 @@ endmodule
  */
 module [BlueCSRCtx_t#(aw, dw)] csr_region_server#(Integer offs, Integer len, Bool can_access, BlueCSRResponse_t unavailable_resp, Server#(BlueCSR_Req_t#(aw, dw), BlueCSR_Rsp_t#(dw)) server, String ident, String desc)();
     RegMapEntry_t#(aw, dw) entry = tagged ServerRegion ServerRegion_t {
-        offs: offs,
-        length: len,
-        can_access: can_access,
+        offset:           offs,
+        length:           len,
+        can_access:       can_access,
         unavailable_resp: unavailable_resp,
-        server: server
+        server:           server
     };
     addToCollection(entry);
     Empty _ <- csr_region_def(offs, len, ident, desc);
@@ -1280,10 +1069,10 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_trig#(Integer offs, Bool delay, BlueCSRTr
     endfunction
 
     if(rw == TRIG_RO || rw == TRIG_RW) begin
-        RegMapEntry_t#(aw, dw) entry = tagged ReadTrigger ReadTrigger_t { offs: offs, delay: delay, trigger: f_trigger };
+        RegMapEntry_t#(aw, dw) entry = tagged ReadTrigger ReadTrigger_t { offset: offs, delay: delay, trigger: f_trigger };
         addToCollection(entry);
     end if(rw == TRIG_WO || rw == TRIG_RW) begin
-        RegMapEntry_t#(aw, dw) entry = tagged WriteTrigger WriteTrigger_t { offs: offs, delay: delay, trigger: f_trigger };
+        RegMapEntry_t#(aw, dw) entry = tagged WriteTrigger WriteTrigger_t { offset: offs, delay: delay, trigger: f_trigger };
         addToCollection(entry);
     end
     return rg_trig;
@@ -1317,12 +1106,12 @@ module [BlueCSRCtx_t#(aw, dw)] csr_reg_trigrw#(Integer offs, Bool delay)(Reg#(Bi
 endmodule
 
 function List#(ReadOpPure_t#(dw)) find_pure_reads_by_offs(List#(ReadOpPure_t#(dw)) l, Integer offs);
-    function Bool p(ReadOpPure_t#(dw) read_op) = read_op.offs == offs;
+    function Bool p(ReadOpPure_t#(dw) read_op) = read_op.offset == offs;
     return List::filter(p, l);
 endfunction
 
 function List#(ReadOpAction_t#(dw)) find_action_reads_by_offs(List#(ReadOpAction_t#(dw)) l, Integer offs);
-    function Bool p(ReadOpAction_t#(dw) read_op) = read_op.offs == offs;
+    function Bool p(ReadOpAction_t#(dw) read_op) = read_op.offset == offs;
     return List::filter(p, l);
 endfunction
 
@@ -1332,32 +1121,32 @@ function List#(AccessPolicyDef_t) find_policies_by_offs(List#(AccessPolicyDef_t)
 endfunction
 
 function List#(WriteOp_t#(dw)) find_write_ops_by_offs(List#(WriteOp_t#(dw)) l, Integer offs);
-    function Bool p(WriteOp_t#(dw) write_op) = write_op.offs == offs;
+    function Bool p(WriteOp_t#(dw) write_op) = write_op.offset == offs;
     return List::filter(p, l);
 endfunction
 
 function List#(WriteOpAction_t#(dw)) find_action_writes_by_offs(List#(WriteOpAction_t#(dw)) l, Integer offs);
-    function Bool p(WriteOpAction_t#(dw) write_op) = write_op.offs == offs;
+    function Bool p(WriteOpAction_t#(dw) write_op) = write_op.offset == offs;
     return List::filter(p, l);
 endfunction
 
 function List#(ReadTrigger_t) find_rtrig_by_offs(List#(ReadTrigger_t) l, Integer offs);
-    function Bool p(ReadTrigger_t rtrig) = rtrig.offs == offs;
+    function Bool p(ReadTrigger_t rtrig) = rtrig.offset == offs;
     return List::filter(p, l);
 endfunction
 
 function List#(WriteTrigger_t) find_wtrig_by_offs(List#(WriteTrigger_t) l, Integer offs);
-    function Bool p(WriteTrigger_t wtrig) = wtrig.offs == offs;
+    function Bool p(WriteTrigger_t wtrig) = wtrig.offset == offs;
     return List::filter(p, l);
 endfunction
 
 function List#(ReadRegion_t#(aw, dw)) find_read_regions_by_range(List#(ReadRegion_t#(aw, dw)) l, Integer offs, Integer len);
-    function Bool p(ReadRegion_t#(aw, dw) read_op) = read_op.offs == offs && read_op.length == len;
+    function Bool p(ReadRegion_t#(aw, dw) read_op) = read_op.offset == offs && read_op.length == len;
     return List::filter(p, l);
 endfunction
 
 function List#(WriteRegion_t#(aw, dw)) find_write_regions_by_range(List#(WriteRegion_t#(aw, dw)) l, Integer offs, Integer len);
-    function Bool p(WriteRegion_t#(aw, dw) write_op) = write_op.offs == offs && write_op.length == len;
+    function Bool p(WriteRegion_t#(aw, dw) write_op) = write_op.offset == offs && write_op.length == len;
     return List::filter(p, l);
 endfunction
 
@@ -1376,6 +1165,10 @@ module [Module] create_blue_csr_with_default_response#(
 )(BlueCSRAccess_ifc#(aw, dw, ni, i));
 
     let {coll_device_ifc, c} <- getCollection(ctx);
+    let validation = validate_blue_csr_entries(c);
+    if(!validation.valid) begin
+        errorM(validation.errors);
+    end
 
     let regdefs         = List::concat(List::map(get_reg_def, c));
     let regiondefs      = List::concat(List::map(get_reg_region_def, c));
@@ -1640,7 +1433,7 @@ module [Module] create_blue_csr_with_default_response#(
     Bool server_busy = False;
     for (Integer i = 0; i < List::length(server_regions); i = i + 1) begin
         let region          = server_regions[i];
-        let region_policies = find_policies_by_offs(access_policies, region.offs, region.length);
+        let region_policies = find_policies_by_offs(access_policies, region.offset, region.length);
         let read_policy     = List::length(region_policies) > 0 ? region_policies[0].read_policy : CSR_ALLOW_ALL;
         let write_policy    = List::length(region_policies) > 0 ? region_policies[0].write_policy : CSR_ALLOW_ALL;
 
@@ -1649,8 +1442,8 @@ module [Module] create_blue_csr_with_default_response#(
 
         let req             = f_req.first;
         let local_req       = req;
-        local_req.addr      = req.addr - fromInteger(region.offs);
-        let req_hit         = is_region_addr(req.addr, region.offs, region.length) && is_word_aligned(req.addr);
+        local_req.addr      = req.addr - fromInteger(region.offset);
+        let req_hit         = is_region_addr(req.addr, region.offset, region.length) && is_word_aligned(req.addr);
         let req_rd_allowed  = access_policy_allows(read_policy,  req.prot);
         let req_wr_allowed  = access_policy_allows(write_policy, req.prot);
 
