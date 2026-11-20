@@ -15,6 +15,10 @@ VERILOG_DIR =verilog
 BUILD_DIR_V = $(BUILD_DIR)/verilog
 SIM_DIR_V = $(SIM_DIR)/verilog
 
+PEAKRDL ?= peakrdl
+RDL_FILES ?= $(wildcard $(SIM_DIR)/*.rdl)
+CHEADER_DIR ?= cheader
+
 VSIM = iverilog
 CLEAR =
 ARGS ?= -u -show-schedule -Xc++ -Wno-format-truncation -Xc++ -Wno-dangling-else
@@ -37,7 +41,14 @@ $(BUILD_DIR)/$(MOD_NAME).ba: $(BSV_SRCS) Makefile
 
 clean:
 	rm -f $(EXE) $(EXE_V) *.so *.sched
-	rm -rf $(BUILD_DIR) $(SIM_DIR) $(VERILOG_DIR)
+	rm -rf $(BUILD_DIR) $(SIM_DIR) $(VERILOG_DIR) $(CHEADER_DIR)
+
+# generate C headers from exported SystemRDL, run the simulation first to export
+cheader:
+	@mkdir -p $(CHEADER_DIR)
+	$(foreach rdl,$(RDL_FILES),$(PEAKRDL) c-header $(rdl) -o $(CHEADER_DIR)/$(basename $(notdir $(rdl))).h;)
+
+.PHONY: cheader
 
 $(EXE): $(BUILD_DIR)/$(MOD_NAME).ba
 	@mkdir -p $(SIM_DIR)
