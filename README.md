@@ -1,6 +1,7 @@
 BlueCSR defines synthesizable CSR maps in Bluespec and can export the same
 metadata as readable documentation or SystemRDL.
 
+![BlueCSR schematic showing how one Bluespec map defines bus-accessible registers, regions, interrupts, and documentation](docs/block-diagram.drawio.svg)
 
 #### Interrupt outputs
 
