@@ -8,3 +8,4 @@ build/
 *_sim
 *.vcd
 *_simv
+.envrc
