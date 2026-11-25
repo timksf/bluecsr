@@ -2,12 +2,15 @@ package ExamplePeripherals;
 
 import FIFOF  :: *;
 import GetPut :: *;
+import Vector :: *;
 
 import BlueCSRCore :: *;
 
 interface ExampleUart_ifc;
     interface Put#(Bit#(8)) rx;
     interface Get#(Bit#(8)) tx;
+
+    method Bool rx_ready;    //a received byte waits in RX_DATA
 endinterface
 
 module [BlueCSRCtx_t#(32, 32)] uart_counters#(Bool received, Bool transmitted)(Empty);
@@ -66,6 +69,8 @@ module [BlueCSRCtx_t#(32, 32)] uart_registers(ExampleUart_ifc);
             return data;
         endmethod
     endinterface
+
+    method rx_ready = f_rx.notEmpty;
 endmodule
 
 module [BlueCSRCtx_t#(32, 32)] timer_registers(Empty);
@@ -101,6 +106,77 @@ module [BlueCSRCtx_t#(32, 32)] timer_registers(Empty);
     rule r_countdown (pw_start || rg_remaining != 0);
         rg_remaining <= pw_start ? rg_reload : rg_remaining - 1;
     endrule
+endmodule
+
+interface ExampleGpio_ifc;
+    method Action pins_in(Bit#(8) pins);    //pin levels, low while not driven
+    method Bit#(8) pins_out;
+    method Bit#(8) pins_oe;
+endinterface
+
+module [BlueCSRCtx_t#(32, 32)] gpio_registers(ExampleGpio_ifc);
+    Integer pins = 8;
+
+    Wire#(Bit#(8)) w_pins_in <- mkDWire(0);
+
+    csr_regmap_def("Gpio", "Eight general purpose pins with output enables and rising edge interrupts.");
+
+    csr_reg_def('h00, "OUTPUT",        "Levels driven on the pins whose output is enabled.");
+    Reg#(Bit#(8)) rg_output <- csr_reg_rw('h00, 0, 0, "LEVEL", "Output level", "One bit per pin.");
+
+    csr_reg_def('h04, "OUTPUT_ENABLE", "Selects the pins this block drives.");
+    Reg#(Bit#(8)) rg_oe     <- csr_reg_rw('h04, 0, 0, "ENABLE", "Output enable", "One bit per pin, set to drive the pin.");
+
+    csr_reg_def('h08, "INPUT",         "Pin levels, sampled every cycle.");
+    Reg#(Bit#(8)) rg_input  <- csr_reg_ro('h08, 0, 0, "LEVEL", "Input level", "One bit per pin.");
+
+    csr_reg_def('h0c, "IRQ_STATUS",    "Sticky rising edge status. Write one to clear.");
+    csr_reg_def('h10, "IRQ_ENABLE",    "Interrupt mask.");
+    for(Integer i = 0; i < pins; i = i + 1)
+        csr_irq('h0c, 'h10, i, 0, w_pins_in[i] == 1 && rg_input[i] == 0, "PIN" + integerToString(i), "Pin " + integerToString(i) + " rising edge", "Set when the pin changes from low to high.");
+
+    rule r_sample;
+        rg_input <= w_pins_in;
+    endrule
+
+    method Action pins_in(Bit#(8) pins_value);
+        w_pins_in <= pins_value;
+    endmethod
+
+    method pins_out = rg_output;
+    method pins_oe  = rg_oe;
+endmodule
+
+typedef 4 SysCtrlIrqs;
+
+interface ExampleSysCtrl_ifc;
+    method Bool irq;    //interrupt request to the CPU
+endinterface
+
+//interrupt sources stay pending in their peripherals, the controller only masks and combines their levels
+module [BlueCSRCtx_t#(32, 32)] sysctrl_registers#(Vector#(SysCtrlIrqs, Bool) sources)(ExampleSysCtrl_ifc);
+    csr_regmap_def("SysCtrl", "System identification, cycle counter, and interrupt controller.");
+
+    csr_reg_def('h00, "ID",          "SoC identification.");
+    Reg#(Bit#(32)) rg_id      <- csr_reg_ro('h00, 'h4253_4f43, 0, "VALUE", "Identification", "Reads as BSOC in ASCII.");
+
+    csr_reg_def('h04, "SCRATCH",     "Free register for software.");
+    Reg#(Bit#(32)) rg_scratch <- csr_reg_rw('h04, 0, 0, "VALUE", "Scratch value", "Not used by hardware.");
+
+    csr_reg_def('h08, "CYCLES",      "Clock cycles since reset.");
+    let i_cycles <- csr_reg_counter_ro('h08, Bit#(32)'(0), 0, True, "COUNT", "Cycle count", "Increments every cycle and wraps.");
+
+    csr_reg_def('h10, "IRQ_PENDING", "Levels of the interrupt sources, sampled every cycle. Bit 0 is the timer, bit 1 the GPIO, bits 2 and 3 the UART receivers.");
+    Reg#(Bit#(SysCtrlIrqs)) rg_pending <- csr_reg_ro('h10, 0, 0, "PENDING", "Pending sources", "One bit per source.");
+
+    csr_reg_def('h14, "IRQ_ENABLE",  "Selects the sources that reach the CPU interrupt.");
+    Reg#(Bit#(SysCtrlIrqs)) rg_enable  <- csr_reg_rw('h14, 0, 0, "ENABLE", "Enabled sources", "One bit per source.");
+
+    rule r_sample;
+        rg_pending <= pack(sources);
+    endrule
+
+    method irq = (pack(sources) & rg_enable) != 0;
 endmodule
 
 endpackage

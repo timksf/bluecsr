@@ -6,32 +6,21 @@ import StmtFSM     :: *;
 
 import Ahb                :: *;
 import AhbMaster          :: *;
-import BlueAddrMap        :: *;
-import BlueCSRFabricMap   :: *;
 import ExamplePeripherals :: *;
 import ExampleSoC         :: *;
 
-function Action write_example_doc(String path, String contents);
-    action
-        File fh <- $fopen(path, "w");
-        if(fh == InvalidFile) $fatal(1, "Could not open %s", path);
-        else begin
-            $fwrite(fh, "%s", contents);
-            $fclose(fh);
-        end
-    endaction
-endfunction
-
 module [Module] mkBlueCSRSoCExample(Empty);
-    match {.i_fabric, .doc} <- create_fabric_with_map(example_ahb_config(), soc_map);
-
-    ExampleSoC_ifc        i_soc     = example_soc_ports(i_fabric);
+    ExampleSoC_ifc         i_soc    <- mkBlueCSRSoC;
     AhbMaster_ifc#(32, 32) i_master <- mkAhbMaster(2);
     mkConnection(i_master.fabric, i_soc.ahb);
 
-    Bit#(32) uart0_base = 'h4000_1000;
-    Bit#(32) uart1_base = 'h4000_2000;
-    Bit#(32) timer_base = 'h4000_3000;
+    Bit#(32) rom_base     = 'h0000_0000;
+    Bit#(32) sysctrl_base = 'h1000_0000;
+    Bit#(32) sram_base    = 'h2000_0000;
+    Bit#(32) uart0_base   = 'h4000_1000;
+    Bit#(32) uart1_base   = 'h4000_2000;
+    Bit#(32) timer_base   = 'h4000_3000;
+    Bit#(32) gpio_base    = 'h4000_4000;
 
     let protection = ahb_protection(AHB_DATA_ACCESS, AHB_PRIVILEGED_ACCESS, AHB_NON_BUFFERABLE, AHB_NON_CACHEABLE);
 
@@ -77,21 +66,44 @@ module [Module] mkBlueCSRSoCExample(Empty);
         endseq;
     endfunction
 
-    Reg#(UInt#(11)) rg_cycles <- mkReg(0);
+    function Stmt check(Bool condition, String message);
+        return seq
+            action
+                if(!condition) $fatal(1, message);
+            endaction
+        endseq;
+    endfunction
+
+    Reg#(UInt#(12)) rg_cycles <- mkReg(0);
+    Reg#(Bit#(8))   rg_pins   <- mkReg(0);
 
     rule r_timeout;
         rg_cycles <= rg_cycles + 1;
-        if(rg_cycles == 1023) $fatal(1, "Timed out running the SoC example");
+        if(rg_cycles == 4095) $fatal(1, "Timed out running the SoC example");
+    endrule
+
+    rule r_drive_pins;
+        i_soc.peripherals.gpio.pins_in(rg_pins);
     endrule
 
     mkAutoFSM(seq
-        action
-            write_example_doc("sim/BlueCSRSoCExample.md",  doc_fabric_map_markdown(doc));
-            write_example_doc("sim/BlueCSRSoCExample.rdl", doc_fabric_map_systemrdl(doc));
-        endaction
+        //AHB memories
+        read_word(rom_base, 'h2000_1000);
+        read_word(rom_base + 'h04, 'h0000_0101);
+        access(rom_base, True, 0, AHB_WORD, True);
+        write_word(sram_base, 'h1234_5678);
+        access(sram_base + 'h01, True, 'h0000_ab00, AHB_BYTE, False);
+        access(sram_base + 'h02, True, 'hcdef_0000, AHB_HALFWORD, False);
+        read_word(sram_base, 'hcdef_ab78);
+        write_word(sram_base + 'hffc, 'h0bad_cafe);
+        read_word(sram_base + 'hffc, 'h0bad_cafe);
 
-        write_word('h0000_0000, 'h1234_5678);
-        read_word('h0000_0000, 'h1234_5678);
+        //system controller behind the AHB adapter
+        read_word(sysctrl_base + 'h00, 'h4253_4f43);
+        write_word(sysctrl_base + 'h04, 'hdead_beef);
+        read_word(sysctrl_base + 'h04, 'hdead_beef);
+        write_word(sysctrl_base + 'h14, 'b0011);
+        read_word(sysctrl_base + 'h10, 0);
 
         read_word(uart0_base + 'h00, 1);
         read_word(uart0_base + 'h80, 'h5541_5254);
@@ -100,20 +112,45 @@ module [Module] mkBlueCSRSoCExample(Empty);
         read_word(uart1_base + 'h100, 0);
         exercise_uart(i_soc.peripherals.uart1, uart1_base, 'h61, 'h62);
 
+        //a waiting byte is pending at the controller but masked
+        i_soc.peripherals.uart1.rx.put('h55);
+        read_word(sysctrl_base + 'h10, 'b1000);
+        check(!i_soc.irq, "Masked UART source raised the CPU interrupt");
+        read_word(uart1_base + 'h04, 'h155);
+
         write_word(timer_base + 'h00, 4);
         write_word(timer_base + 'h10, 1);
         write_word(timer_base + 'h04, 1);
         await(i_soc.peripherals.timer_irq);
+        check(i_soc.irq, "Timer interrupt did not reach the CPU");
         read_word(timer_base + 'h08, 1);
         read_word(timer_base + 'h0c, 1);
+        read_word(sysctrl_base + 'h10, 'b0001);
         write_word(timer_base + 'h0c, 1);
         read_word(timer_base + 'h0c, 0);
-        action
-            if(i_soc.peripherals.timer_irq) $fatal(1, "Timer interrupt stayed asserted after clearing it");
-        endaction
+        check(!i_soc.peripherals.timer_irq && !i_soc.irq, "Timer interrupt stayed asserted after clearing it");
 
-        access('h4000_4000, False, 0, AHB_WORD, True);
-        $display("PASS: SoC scratch memory, both UARTs, timer IRQ, and unmapped access");
+        //GPIO outputs, inputs and rising edge interrupt
+        write_word(gpio_base + 'h00, 'ha5);
+        write_word(gpio_base + 'h04, 'h0f);
+        check(i_soc.peripherals.gpio.pins_out == 'ha5 && i_soc.peripherals.gpio.pins_oe == 'h0f, "GPIO outputs do not match their registers");
+        write_word(gpio_base + 'h10, 'h04);
+        rg_pins <= 'h02;
+        read_word(gpio_base + 'h08, 'h02);
+        check(!i_soc.peripherals.gpio_irq, "Masked GPIO pin raised the interrupt");
+        rg_pins <= 'h06;
+        await(i_soc.peripherals.gpio_irq);
+        check(i_soc.irq, "GPIO interrupt did not reach the CPU");
+        read_word(gpio_base + 'h0c, 'h06);
+        read_word(sysctrl_base + 'h10, 'b0010);
+        write_word(gpio_base + 'h0c, 'h06);
+        read_word(gpio_base + 'h0c, 0);
+        check(!i_soc.peripherals.gpio_irq && !i_soc.irq, "GPIO interrupt stayed asserted after clearing it");
+
+        //unmapped addresses on both segments
+        access('h4000_5000, False, 0, AHB_WORD, True);
+        access('h3000_0000, False, 0, AHB_WORD, True);
+        $display("PASS: SoC memories, system controller, UARTs, timer, GPIO, interrupts, and unmapped access");
     endseq);
 endmodule
 

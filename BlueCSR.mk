@@ -14,7 +14,8 @@ ifneq ($(BLUECSR_BLUEFABRIC_MK),)
 include $(BLUECSR_BLUEFABRIC_MK)
 endif
 
-EXTRA_BSV_LIBS += $(BLUECSR_SRC)
+# the core in src needs only the Bluespec libraries, bus and soc build on BlueFabric and BlueAXI
+EXTRA_BSV_LIBS += $(BLUECSR_SRC) $(BLUECSR_SRC)/bus $(BLUECSR_SRC)/soc
 
 $(info Adding BlueCSR from $(BLUECSR_SRC))
 

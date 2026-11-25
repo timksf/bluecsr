@@ -77,17 +77,24 @@ $(EXE_V): compileV
 	$(CMP) -p $(BLUEIMPORT) -bdir $(BUILD_DIR_V) -simdir $(SIM_DIR_V) -vsim $(VSIM) -e $(MOD_NAME) $(ARGS) -verilog -o $@ -vdir $(VERILOG_DIR) $(VERILOG_DIR)/$(MOD_NAME).v
 
 SOC_BLUEFABRIC_SRC ?= dep/bluefabric/src
-SOC_BSV_PATH = +:src:examples:$(SOC_BLUEFABRIC_SRC)/common:$(SOC_BLUEFABRIC_SRC)/soc:$(SOC_BLUEFABRIC_SRC)/ahb:$(SOC_BLUEFABRIC_SRC)/apb
-SOC_SOURCE_DIRS = src examples $(addprefix $(SOC_BLUEFABRIC_SRC)/,common soc ahb apb)
-SOC_BUILD_DIR = $(BUILD_DIR)/soc-docs
-SOC_HTML_DIR ?= sim/BlueCSRSoCExample-html
+SOC_BLUEAXI_SRC ?= dep/bluefabric/dep/blueaxi/src
+SOC_SOURCE_DIRS = src src/bus src/soc examples $(addprefix $(SOC_BLUEFABRIC_SRC)/,common soc ahb apb axi) $(SOC_BLUEAXI_SRC)
+SOC_BSV_PATH = +:$(subst $(eval) ,:,$(SOC_SOURCE_DIRS))
+SOC_BUILD_DIR = $(BUILD_DIR)/soc
+SOC_DOC_DIR = $(BUILD_DIR)/soc-doc
+SOC_HTML_DIR ?= sim/ExampleSoC-html
 
-.PHONY: soc-docs soc-html
-soc-docs:
-	@mkdir -p sim
+.PHONY: soc-test soc-docs soc-html
+soc-test:
 	$(MAKE) sim NAME=BlueCSRSoCExample TOP_FILE=examples/BlueCSRSoCExample.bsv \
 	    BLUEIMPORT="$(SOC_BSV_PATH)" SOURCE_DIRS="$(SOC_SOURCE_DIRS)" BUILD_DIR="$(SOC_BUILD_DIR)" \
 	    SIM_DIR="$(SOC_BUILD_DIR)" EXE="$(SOC_BUILD_DIR)/soc_sim"
 
+# the doc top writes sim/ExampleSoC.rdl during elaboration, removing its .bo forces a fresh elaboration
+soc-docs:
+	@mkdir -p sim $(SOC_DOC_DIR)
+	rm -f $(SOC_DOC_DIR)/ExampleSoCDoc.bo
+	$(CMP) -u -verilog -demote-errors G0066 -g mkExampleSoCDoc -p $(SOC_BSV_PATH) -bdir $(SOC_DOC_DIR) -vdir $(SOC_DOC_DIR) -info-dir $(SOC_DOC_DIR) examples/ExampleSoCDoc.bsv
+
 soc-html: soc-docs
-	$(PEAKRDL) html sim/BlueCSRSoCExample.rdl -o "$(SOC_HTML_DIR)"
+	$(PEAKRDL) html sim/ExampleSoC.rdl -o "$(SOC_HTML_DIR)"

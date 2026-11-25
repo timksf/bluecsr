@@ -110,6 +110,10 @@ Interfaces and types:
 - `BlueCSRProt_t` security attribute enum: `CSR_SECURE` or `CSR_INSECURE`.
 - `BlueCSRTrigger_t` trigger mode enum: `TRIG_RO`, `TRIG_WO`, `TRIG_RW`.
 
+The core in `src/` needs only the Bluespec libraries. The bus adapters in `src/bus/` build on BlueFabric and
+BlueAXI, the SoC integration in `src/soc/` on BlueFabric address maps, and the umbrella package `BlueCSR`
+re-exports the adapters.
+
 AXI4-Lite adapter API:
 - `mkBlueCSRAXI4LiteAdapter` bridges a `BlueCSR_ifc` instance to AXI4-Lite slave read and write channels.
 - `BlueCSR_AXI4Lite_ifc#(aw, dw, ni)` contains the AXI4-Lite read/write slave interfaces and forwards the same interrupt vector.
@@ -128,48 +132,30 @@ Use `csr_block` to place child maps at offsets while sharing one decoder and req
 
 Use `mkBlueCSRMux` for existing `BlueCSR_ifc` instances, different address widths, or a separate decode stage. A map assembled with `csr_block` can also be a mux child.
 
-### SoC address-map documentation with BlueFabric
+### SoC documentation with BlueFabric
 
-Run `make soc-docs` with BSC on your path and the BlueFabric submodule
-initialized. The [example SoC](examples/ExampleSoC.bsv) connects an AHB
-scratch word and an APB segment with two UART register front ends and a one-shot
-timer. The hardware top exposes AHB, two sets of UART byte streams, and the
-timer IRQ. The
-[peripheral definitions](examples/ExamplePeripherals.bsv) demonstrate
-read-write fields, FIFO data registers, a read-only identification region,
-nested counters, an action register, and a write-one-to-clear interrupt.
-The [testbench](examples/BlueCSRSoCExample.bsv) exercises the bus and peripheral
-interfaces and writes the documentation for inspection.
+A SoC built from BlueFabric address maps exports its address space as SystemRDL, including every BlueCSR
+register map, for PeakRDL to turn into HTML, C headers and more. Declare register maps with
+`csr_addr_map_target` from `BlueCSRSoC`. The bus port type of the map selects the APB, AHB-Lite or
+AXI4-Lite adapter:
 
-- `sim/BlueCSRSoCExample.md` has a window table for each fabric segment and a
-  separate BlueCSR register table for each peripheral. The fabric walks targets in
-  ascending address order and passes the effective address offset to each
-  register table. For standalone Markdown, `doc_blue_csr_markdown_at` takes an
-  explicit offset and `doc_blue_csr_markdown` defaults to zero.
-- `sim/BlueCSRSoCExample.rdl` keeps the hierarchy as nested SystemRDL
-  `addrmap` instances. Each instance has an offset within its parent.
-  BlueCSR generates register and field definitions using the same renderer
-  as its standalone SystemRDL exporter.
-- `make soc-html` uses PeakRDL to generate a browsable register map in
-  `sim/BlueCSRSoCExample-html/`. [PeakRDL HTML plugin](https://github.com/SystemRDL/PeakRDL-html)
+```bsv
+BlueCSRTarget_ifc#(1, ExampleGpio_ifc) i_gpio <- csr_addr_map_target('h4000, 'h1000, "gpio", gpio_registers);
+```
 
-To use this in a design, import `BlueCSRFabricMap` and use `FabricMapCtx_t` on
-the documented segments. Keep using BlueFabric's `addr_map_def`. Use
-`fabric_target` directly for an ordinary endpoint and `fabric_bridge`
-for an address-preserving bridge. For a CSR-backed endpoint, call
-`bluecsr_fabric_target` from `BlueCSRSoC` with its existing register
-definitions, CSR configuration, and a module that adapts the CSR interface to the bus. The
-helper builds the device and derives both exports from the same definitions.
-SystemRDL instance names follow the fabric target names. Ordinary endpoints
-appear in SystemRDL as opaque address windows with unspecified layout and
-access.
+`csr_addr_map_target_cfg` also takes the CSR and adapter configurations. `csr_addr_map_target_with` takes
+your own endpoint module, which has to pass the low address bits of the core through like the adapters do.
+A register map that does not fit its window fails the build.
 
-The hardware top uses `create_fabric`. The testbench uses
-`create_fabric_with_map` to get the same bus and its static map for export.
-Both elaborate the same address map definitions. The renderers follow the
-decoder's address view.
-`cfg.local_addr = True` adds the window base when mapping a target back into
-the parent address space. With the setting disabled, the target sees the
-segment address. The export includes registers and regions that fit inside
-the path's visible windows. Default targets appear as fallback rows in
-Markdown.
+A documentation top writes the export during elaboration. Build it with `-demote-errors G0066` because its
+bus slaves have no master:
+
+```bsv
+(* synthesize *)
+module mkExampleSoCDoc(Empty);
+    export_addr_map_systemrdl("sim/ExampleSoC.rdl", example_ahb_config(), soc_map);
+endmodule
+```
+
+See [ExampleSoC.bsv](examples/ExampleSoC.bsv) for a SoC with AHB memories, a system controller and APB
+peripherals, and [ExampleSoCDoc.bsv](examples/ExampleSoCDoc.bsv) for its documentation top.
