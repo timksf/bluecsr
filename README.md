@@ -127,3 +127,49 @@ APB adapter API:
 Use `csr_block` to place child maps at offsets while sharing one decoder and request/response FIFO pair. Map definitions must be available at elaboration time and use the same `aw` and `dw`.
 
 Use `mkBlueCSRMux` for existing `BlueCSR_ifc` instances, different address widths, or a separate decode stage. A map assembled with `csr_block` can also be a mux child.
+
+### SoC address-map documentation with BlueFabric
+
+Run `make soc-docs` with BSC on your path and the BlueFabric submodule
+initialized. The [example SoC](examples/ExampleSoC.bsv) connects an AHB
+scratch word and an APB segment with two UART register front ends and a one-shot
+timer. The hardware top exposes AHB, two sets of UART byte streams, and the
+timer IRQ. The
+[peripheral definitions](examples/ExamplePeripherals.bsv) demonstrate
+read-write fields, FIFO data registers, a read-only identification region,
+nested counters, an action register, and a write-one-to-clear interrupt.
+The [testbench](examples/BlueCSRSoCExample.bsv) exercises the bus and peripheral
+interfaces and writes the documentation for inspection.
+
+- `sim/BlueCSRSoCExample.md` has a window table for each fabric segment and a
+  separate BlueCSR register table for each peripheral. The fabric walks targets in
+  ascending address order and passes the effective address offset to each
+  register table. For standalone Markdown, `doc_blue_csr_markdown_at` takes an
+  explicit offset and `doc_blue_csr_markdown` defaults to zero.
+- `sim/BlueCSRSoCExample.rdl` keeps the hierarchy as nested SystemRDL
+  `addrmap` instances. Each instance has an offset within its parent.
+  BlueCSR generates register and field definitions using the same renderer
+  as its standalone SystemRDL exporter.
+- `make soc-html` uses PeakRDL to generate a browsable register map in
+  `sim/BlueCSRSoCExample-html/`. [PeakRDL HTML plugin](https://github.com/SystemRDL/PeakRDL-html)
+
+To use this in a design, import `BlueCSRFabricMap` and use `FabricMapCtx_t` on
+the documented segments. Keep using BlueFabric's `addr_map_def`. Use
+`fabric_target` directly for an ordinary endpoint and `fabric_bridge`
+for an address-preserving bridge. For a CSR-backed endpoint, call
+`bluecsr_fabric_target` from `BlueCSRSoC` with its existing register
+definitions, CSR configuration, and a module that adapts the CSR interface to the bus. The
+helper builds the device and derives both exports from the same definitions.
+SystemRDL instance names follow the fabric target names. Ordinary endpoints
+appear in SystemRDL as opaque address windows with unspecified layout and
+access.
+
+The hardware top uses `create_fabric`. The testbench uses
+`create_fabric_with_map` to get the same bus and its static map for export.
+Both elaborate the same address map definitions. The renderers follow the
+decoder's address view.
+`cfg.local_addr = True` adds the window base when mapping a target back into
+the parent address space. With the setting disabled, the target sees the
+segment address. The export includes registers and regions that fit inside
+the path's visible windows. Default targets appear as fallback rows in
+Markdown.

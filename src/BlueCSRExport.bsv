@@ -6,6 +6,19 @@ import ModuleCollect :: *;
 import BlueCSRCore :: *;
 import BlueCSRValidation :: *;
 
+function String blue_csr_field_access_name(RegFieldDef_t rf);
+    case (rf.access_type)
+        CSR_RW:  return "RW";
+        CSR_RO:  return "RO";
+        CSR_RC:  return "RC";
+        CSR_WC:  return "WC";
+        CSR_WS:  return "WS";
+        CSR_WO:  return "WO";
+        CSR_W1S: return "W1S";
+        CSR_W1C: return "W1C";
+    endcase
+endfunction
+
 module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
 
     let {_, c} <- getCollection(ctx);
@@ -55,19 +68,6 @@ module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
         return "reset=" + rf.reset_value;
     endfunction
 
-    function String fieldAccess(RegFieldDef_t rf);
-        case (rf.access_type)
-            CSR_RW:  return "RW";
-            CSR_RO:  return "RO";
-            CSR_RC:  return "RC";
-            CSR_WC:  return "WC";
-            CSR_WS:  return "WS";
-            CSR_WO:  return "WO";
-            CSR_W1S: return "W1S";
-            CSR_W1C: return "W1C";
-        endcase
-    endfunction
-
     function Integer regOffsetWidth(RegDef_t regdef);
         return stringLength(integerToHex(regdef.offset));
     endfunction
@@ -104,7 +104,7 @@ module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
     endfunction
 
     function Integer fieldAccessWidth(RegFieldDef_t rf);
-        return stringLength(fieldAccess(rf));
+        return stringLength(blue_csr_field_access_name(rf));
     endfunction
 
     function String doc_reg(RegDef_t regdef);
@@ -118,7 +118,7 @@ module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
             let rf = regfields[fi];
             if(rf.offset == regdef.offset) begin
                 String bits   = fieldBits(rf);
-                String access = fieldAccess(rf);
+                String access = blue_csr_field_access_name(rf);
                 String reset  = fieldReset(rf);
                 field_doc = field_doc + "\n  "
                     + padRight(rf.identifier, field_identifier_width)
@@ -166,18 +166,46 @@ module [Module] doc_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
 
 endmodule
 
+function Bool blue_csr_range_visible(Integer first, Integer limit, Integer base, Integer size);
+    return first <= base && base + size <= limit;
+endfunction
+
+function String blue_csr_rdl_string(String value);
+    function List#(Char) escape_char(Char ch) =
+        (ch == "\"" || ch == "\\") ? Cons("\\", Cons(ch, Nil)) : Cons(ch, Nil);
+    return charListToString(List::concat(List::map(escape_char, stringToCharList(value))));
+endfunction
+
 module [Module] doc_blue_csr_markdown#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t#(dw));
 
-    let {_, c} <- getCollection(ctx);
-    let validation  = validate_blue_csr_entries(c);
-    let blockdefs   = List::concat(List::map(get_reg_block_def, c));
-    let regdefs     = List::concat(List::map(get_reg_def, c));
-    let regiondefs  = List::concat(List::map(get_reg_region_def, c));
-    let regfields   = List::concat(List::map(get_regfield_def, c));
+    let doc <- doc_blue_csr_markdown_at(ctx, 0);
+    return doc;
+endmodule
 
-    if(!validation.valid) begin
-        errorM(validation.errors);
-    end
+module [Module] doc_blue_csr_markdown_at#(
+    BlueCSRCtx_t#(aw, dw, i) ctx, Integer address_offset
+)(RegMapDoc_t#(dw));
+    let {_, entries} <- getCollection(ctx);
+    let validation   =  validate_blue_csr_entries(entries);
+    if(!validation.valid) errorM(validation.errors);
+
+    return RegMapDoc_t {
+        reg_defs: render_blue_csr_markdown(entries, address_offset, 0, 2 ** valueOf(aw))
+    };
+endmodule
+
+function String render_blue_csr_markdown(
+    List#(RegMapEntry_t#(aw, dw)) c, Integer address_offset, Integer first, Integer limit
+);
+    function Bool block_visible (RegBlockDef_t  block_def)  = blue_csr_range_visible(first, limit, block_def.offset,  block_def.length);
+    function Bool reg_visible   (RegDef_t       reg_def)    = blue_csr_range_visible(first, limit, reg_def.offset,    valueOf(TDiv#(dw, 8)));
+    function Bool region_visible(RegRegionDef_t region_def) = blue_csr_range_visible(first, limit, region_def.offset, region_def.length);
+
+    let validation  = validate_blue_csr_entries(c);
+    let blockdefs   = List::filter(block_visible, List::concat(List::map(get_reg_block_def, c)));
+    let regdefs     = List::filter(reg_visible, List::concat(List::map(get_reg_def, c)));
+    let regiondefs  = List::filter(region_visible, List::concat(List::map(get_reg_region_def, c)));
+    let regfields   = List::concat(List::map(get_regfield_def, c));
 
     function String repeatString(String value, Integer count);
         if(count <= 0) return "";
@@ -198,26 +226,13 @@ module [Module] doc_blue_csr_markdown#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t
         return "[" + padInteger(msb, 2) + ":" + padInteger(rf.bit_offset, 2) + "]";
     endfunction
 
-    function String fieldAccess(RegFieldDef_t rf);
-        case (rf.access_type)
-            CSR_RW:  return "RW";
-            CSR_RO:  return "RO";
-            CSR_RC:  return "RC";
-            CSR_WC:  return "WC";
-            CSR_WS:  return "WS";
-            CSR_WO:  return "WO";
-            CSR_W1S: return "W1S";
-            CSR_W1C: return "W1C";
-        endcase
-    endfunction
-
     function Integer regOffsetWidth(RegDef_t regdef);
-        return stringLength(integerToHex(regdef.offset));
+        return stringLength(integerToHex(regdef.offset + address_offset));
     endfunction
 
     function Integer regionAddressWidth(RegRegionDef_t regiondef);
         Integer end_offset = regiondef.offset + regiondef.length - 1;
-        return max(stringLength(integerToHex(regiondef.offset)), stringLength(integerToHex(end_offset)));
+        return max(stringLength(integerToHex(regiondef.offset + address_offset)), stringLength(integerToHex(end_offset + address_offset)));
     endfunction
 
     function Integer addressWidth();
@@ -227,7 +242,7 @@ module [Module] doc_blue_csr_markdown#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t
     endfunction
 
     function String formatAddress(Integer value);
-        return "0x" + padLeftWith(integerToHex(value), addressWidth(), "0");
+        return "0x" + padLeftWith(integerToHex(value + address_offset), addressWidth(), "0");
     endfunction
 
     function String markdownHeader();
@@ -247,7 +262,7 @@ module [Module] doc_blue_csr_markdown#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t
             + " | "
             + fieldBits(rf)
             + " | "
-            + fieldAccess(rf)
+            + blue_csr_field_access_name(rf)
             + " | "
             + rf.reset_value
             + " | "
@@ -299,16 +314,12 @@ module [Module] doc_blue_csr_markdown#(BlueCSRCtx_t#(aw, dw, i) ctx)(RegMapDoc_t
     String region_doc = List::foldl(strConcat, "", List::map(doc_region, regiondefs));
     String map_doc    = validation.map_name + " " + validation.map_description;
 
-    return RegMapDoc_t {
-        reg_defs: validation.valid ? map_doc + "\n\n" + block_doc + markdownHeader() + reg_doc + region_doc : validation.errors
-    };
+    return map_doc + "\n\n" + block_doc + markdownHeader() + reg_doc + region_doc;
+endfunction
 
-endmodule
-
-module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String output_path)(BlueCSRExport_ifc);
-
-    let {_, c} <- getCollection(ctx);
-    let validation          = validate_blue_csr_entries(c);
+function String render_blue_csr_systemrdl(
+    List#(RegMapEntry_t#(aw, dw)) c, String indent, Integer address_offset, Integer first, Integer limit
+);
     let regdefs             = List::concat(List::map(get_reg_def, c));
     let regiondefs          = List::concat(List::map(get_reg_region_def, c));
     let regfields           = List::concat(List::map(get_regfield_def, c));
@@ -321,10 +332,6 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
     let server_regions      = List::concat(List::map(get_server_region, c));
     let read_triggers       = List::concat(List::map(get_read_trigger, c));
     let write_triggers      = List::concat(List::map(get_write_trigger, c));
-
-    Reg#(Bool) rg_done    <- mkReg(False);
-    Reg#(Bool) rg_success <- mkReg(False);
-    Reg#(Bool) rg_started <- mkReg(False);
 
     function Bool has_read_access(Integer offs);
         Bool found = False;
@@ -383,12 +390,6 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
         else return "na";
     endfunction
 
-    //quotes and backslashes in descriptions must be escaped in SystemRDL strings
-    function String rdl_string(String value);
-        function List#(Char) escape_char(Char ch) = (ch == "\"" || ch == "\\") ? Cons("\\", Cons(ch, Nil)) : Cons(ch, Nil);
-        return charListToString(List::concat(List::map(escape_char, stringToCharList(value))));
-    endfunction
-
     function String get_field_properties(BlueCSRAccess_t access_type);
         case (access_type)
             CSR_RW:  return "sw = rw;";
@@ -402,90 +403,83 @@ module [Module] export_systemrdl_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, String 
         endcase
     endfunction
 
-    rule r_export_once (!rg_started);
-        rg_started <= True;
-
-        if(!validation.valid) begin
-            $display("%s", validation.errors);
-            rg_done <= True;
-            rg_success <= False;
+    Integer word_bytes = valueOf(TDiv#(dw, 8));
+    String  word_width = integerToString(valueOf(dw));
+    String  body       = "";
+    for(Integer ri = 0; ri < length(regiondefs); ri = ri + 1) begin
+        let    region = regiondefs[ri];
+        String sw     = get_sw(has_region_read_access(region.offset, region.length), has_region_write_access(region.offset, region.length));
+        if(sw != "na" && blue_csr_range_visible(first, limit, region.offset, region.length)) begin
+            body = body + indent + "external mem {\n"
+                + indent + "  desc = \"" + blue_csr_rdl_string(region.description) + "\";\n"
+                + indent + "  mementries = " + integerToString(region.length / word_bytes) + ";\n"
+                + indent + "  memwidth = " + word_width + ";\n"
+                + indent + "  sw = " + sw + ";\n"
+                + indent + "} " + region.identifier + " @ 0x" + integerToHex(region.offset + address_offset) + ";\n";
         end
-        else begin
-
-            File fh <- $fopen(output_path, "w");
-            if(fh == InvalidFile) begin
-                $display("BlueCSR SystemRDL export failed: could not open %s", output_path);
-                rg_done <= True;
-                rg_success <= False;
+    end
+    for(Integer ri = 0; ri < length(regdefs); ri = ri + 1) begin
+        let    rd = regdefs[ri];
+        String sw = get_sw(has_read_access(rd.offset), has_write_access(rd.offset));
+        if(sw != "na" && blue_csr_range_visible(first, limit, rd.offset, word_bytes)) begin
+            String field_body = "";
+            for(Integer fi = 0; fi < length(regfields); fi = fi + 1) begin
+                let rf = regfields[fi];
+                if(rf.offset == rd.offset) begin
+                    Integer msb = rf.bit_offset + rf.width - 1;
+                    field_body = field_body + indent + "  field { " + get_field_properties(rf.access_type)
+                        + " desc = \"" + blue_csr_rdl_string(rf.description) + "\"; } "
+                        + rf.identifier + "[" + integerToString(msb) + ":" + integerToString(rf.bit_offset)
+                        + "] = " + rf.reset_value + ";\n";
+                end
             end
+
+            if(field_body == "")
+                field_body = indent + "  field { sw = " + sw + "; desc = \"No field metadata\"; } RESERVED["
+                    + integerToString(valueOf(dw) - 1) + ":0];\n";
+            body = body + indent + "reg {\n"
+                + indent + "  desc = \"" + blue_csr_rdl_string(rd.description) + "\";\n"
+                + indent + "  regwidth = " + word_width + ";\n" + field_body
+                + indent + "} " + rd.identifier + " @ 0x" + integerToHex(rd.offset + address_offset) + ";\n";
+        end
+    end
+    let map_defs = List::concat(List::map(get_regmap_def, c));
+    if(body != "" && !List::isNull(map_defs) && map_defs[0].description != "")
+        body = indent + "desc = \"" + blue_csr_rdl_string(map_defs[0].description) + "\";\n" + body;
+    return body;
+endfunction
+
+module [Module] export_systemrdl_blue_csr#(
+    BlueCSRCtx_t#(aw, dw, i) ctx, String output_path
+)(BlueCSRExport_ifc);
+    let {_, entries} <- getCollection(ctx);
+
+    let    validation = validate_blue_csr_entries(entries);
+    String body       = render_blue_csr_systemrdl(entries, "  ", 0, 0, 2 ** valueOf(aw));
+    String text       = "// Auto-generated by export_systemrdl_blue_csr\naddrmap "
+        + validation.map_name + " {\n" + body + "};\n";
+
+    Reg#(Bool) rg_done    <- mkReg(False);
+    Reg#(Bool) rg_success <- mkReg(False);
+
+    rule r_export_once (!rg_done);
+        rg_done <= True;
+        if(!validation.valid) $display("%s", validation.errors);
+        else begin
+            File fh <- $fopen(output_path, "w");
+            if(fh == InvalidFile)
+                $display("BlueCSR SystemRDL export failed: could not open %s", output_path);
             else begin
-                $fwrite(fh, "// Auto-generated by export_systemrdl_blue_csr\n");
-                $fwrite(fh, "addrmap %s {\n", validation.map_name);
-                if(validation.map_description != "") begin
-                    $fwrite(fh, "  desc = \"%s\";\n", rdl_string(validation.map_description));
-                end
-                for(Integer ri = 0; ri < length(regiondefs); ri = ri + 1) begin
-                    let region = regiondefs[ri];
-                    String  sw      = get_sw(has_region_read_access(region.offset, region.length), has_region_write_access(region.offset, region.length));
-                    Integer entries = region.length / valueOf(TDiv#(dw, 8));
-                    $fwrite(fh, "  mem {\n");
-                    $fwrite(fh, "    desc = \"%s\";\n", rdl_string(region.description));
-                    $fwrite(fh, "    mementries = %0d;\n", entries);
-                    $fwrite(fh, "    memwidth = %0d;\n", valueOf(dw));
-                    $fwrite(fh, "    sw = %s;\n", sw);
-                    $fwrite(fh, "  } external %s @ 0x%s;\n", region.identifier, integerToHex(region.offset));
-                end
-                for(Integer ri = 0; ri < length(regdefs); ri = ri + 1) begin
-                    let rd = regdefs[ri];
-                    Bool   can_read    = has_read_access(rd.offset);
-                    Bool   can_write   = has_write_access(rd.offset);
-                    String sw          = get_sw(can_read, can_write);
-                    Bool   wrote_field = False;
-
-                    //SystemRDL rejects registers that software cannot access
-                    if(can_read || can_write) begin
-                        $fwrite(fh, "  reg {\n");
-                        $fwrite(fh, "    desc = \"%s\";\n", rdl_string(rd.description));
-                        $fwrite(fh, "    regwidth = %0d;\n", valueOf(dw));
-
-                        for(Integer fi = 0; fi < length(regfields); fi = fi + 1) begin
-                            let rf = regfields[fi];
-                            if(rf.offset == rd.offset) begin
-                                Integer msb = rf.bit_offset + rf.width - 1;
-                                $fwrite(fh, "    field { %s desc = \"%s\"; } %s[%0d:%0d] = %s;\n", get_field_properties(rf.access_type), rdl_string(rf.description), rf.identifier, msb, rf.bit_offset, rf.reset_value);
-                                wrote_field = True;
-                            end
-                        end
-
-                        if(!wrote_field) begin
-                            $fwrite(fh, "    field { sw = %s; desc = \"No field metadata\"; } RESERVED[%0d:0];\n", sw, valueOf(dw) - 1);
-                        end
-
-                        $fwrite(fh, "  } %s @ 0x%s;\n", rd.identifier, integerToHex(rd.offset));
-                    end
-                    else begin
-                        $fwrite(fh, "  // %s @ 0x%s omitted: no software access\n", rd.identifier, integerToHex(rd.offset));
-                    end
-                end
-
-                $fwrite(fh, "};\n");
-                $fflush(fh);
+                $fwrite(fh, "%s", text);
                 $fclose(fh);
-                rg_done <= True;
                 rg_success <= True;
                 $display("BlueCSR SystemRDL export complete: %s", output_path);
             end
         end
     endrule
 
-    method Bool done;
-        return rg_done;
-    endmethod
-
-    method Bool success;
-        return rg_success;
-    endmethod
-
+    method done    = rg_done;
+    method success = rg_success;
 endmodule
 
 endpackage

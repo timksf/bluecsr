@@ -1172,10 +1172,19 @@ instance DefaultValue#(BlueCSRCfg_t);
 endinstance
 
 module [Module] create_blue_csr_cfg#(BlueCSRCtx_t#(aw, dw, i) ctx, BlueCSRCfg_t cfg)(BlueCSRAccess_ifc#(aw, dw, ni, i));
+    let {device, entries} <- getCollection(ctx);
+    let i_csr             <- create_blue_csr_from_entries(device, entries, cfg);
+    return i_csr;
+endmodule
+
+module [Module] create_blue_csr_from_entries#(
+    i                             coll_device_ifc,
+    List#(RegMapEntry_t#(aw, dw)) c,
+    BlueCSRCfg_t                  cfg
+)(BlueCSRAccess_ifc#(aw, dw, ni, i));
     Bool              buffer_in        = cfg.buffer_in;
     BlueCSRResponse_t default_response = cfg.default_response;
 
-    let {coll_device_ifc, c} <- getCollection(ctx);
     let validation = validate_blue_csr_entries(c);
     if(!validation.valid) begin
         errorM(validation.errors);
