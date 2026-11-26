@@ -95,8 +95,15 @@ module [BlueCSRCtx_t#(8, 32)] action_test_map(ActionTest_ifc);
     method value = rg_value;
 endmodule
 
-module [Module] mkActionTest#(Bool buffer_in)(ReadOnly#(Bool));
-    BlueCSRAccess_ifc#(8, 32, 0, ActionTest_ifc) i_csr   <- create_blue_csr(action_test_map, buffer_in);
+module [Module] mkActionTest#(Bool buffer_in, Bool buffer_decode, Bool buffer_out)(ReadOnly#(Bool));
+    BlueCSRCfg_t cfg = BlueCSRCfg_t {
+        buffer_in:        buffer_in,
+        buffer_decode:    buffer_decode,
+        buffer_out:       buffer_out,
+        default_response: CSR_DECERR
+    };
+
+    BlueCSRAccess_ifc#(8, 32, 0, ActionTest_ifc) i_csr   <- create_blue_csr_cfg(action_test_map, cfg);
     Reg#(Bool)                                   rg_done <- mkReg(False);
 
     function Stmt access(Bool wr, Bit#(8) addr, Bit#(32) data, Bit#(4) strb, BlueCSRProt_t prot, Bit#(32) expected_data, BlueCSRResponse_t expected_resp);
@@ -107,8 +114,8 @@ module [Module] mkActionTest#(Bool buffer_in)(ReadOnly#(Bool));
             action
                 let rsp <- i_csr.external.response.get;
                 if(rsp.rdata != expected_data || rsp.resp != expected_resp) begin
-                    $display("FAIL: buffer=%0d wr=%0d addr=%h data=%h strb=%h expected=%h/%h got=%h/%h",
-                        buffer_in, wr, addr, data, strb, expected_data, pack(expected_resp), rsp.rdata, pack(rsp.resp));
+                    $display("FAIL: in=%0d dec=%0d out=%0d wr=%0d addr=%h data=%h strb=%h expected=%h/%h got=%h/%h",
+                        buffer_in, buffer_decode, buffer_out, wr, addr, data, strb, expected_data, pack(expected_resp), rsp.rdata, pack(rsp.resp));
                     $finish(1);
                 end
             endaction
@@ -181,7 +188,15 @@ module [Module] mkActionTest#(Bool buffer_in)(ReadOnly#(Bool));
         access(False, 'h09, 0, 0, CSR_SECURE, 0, CSR_DECERR);
         rg_done <= True;
     endseq;
-    mkAutoFSM(test);
+    //instances run at different speeds, so none may end the simulation on its own
+    FSM        i_fsm      <- mkFSM(test);
+    Reg#(Bool) rg_started <- mkReg(False);
+
+    rule r_start (!rg_started);
+        i_fsm.start;
+        rg_started <= True;
+    endrule
+
     method _read = rg_done;
 endmodule
 
@@ -207,8 +222,11 @@ endmodule
 
 (* synthesize *)
 module [Module] mkTestBlueCSRAct(Empty);
-    ReadOnly#(Bool)                     i_unbuffered <- mkActionTest(False);
-    ReadOnly#(Bool)                     i_buffered   <- mkActionTest(True);
+    ReadOnly#(Bool)                     i_unbuffered <- mkActionTest(False, False, False);
+    ReadOnly#(Bool)                     i_buffered   <- mkActionTest(True,  False, False);
+    ReadOnly#(Bool)                     i_decode     <- mkActionTest(False, True,  False);
+    ReadOnly#(Bool)                     i_decode_in  <- mkActionTest(True,  True,  False);
+    ReadOnly#(Bool)                     i_all        <- mkActionTest(True,  True,  True);
     BlueCSRAccess_ifc#(8, 16, 0, Empty) i_narrow     <- create_blue_csr(action_narrow_map, False);
     Reg#(UInt#(16))                     rg_cycles    <- mkReg(0);
 
@@ -229,7 +247,7 @@ module [Module] mkTestBlueCSRAct(Empty);
             $finish(1);
         end
     endrule
-    rule r_finish (i_unbuffered && i_buffered);
+    rule r_finish (i_unbuffered && i_buffered && i_decode && i_decode_in && i_all);
         $display("PASS: action RO/WO/RW readiness, errors, strobes, permissions, metadata and response stalls");
         $finish(0);
     endrule

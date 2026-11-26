@@ -58,8 +58,15 @@ module [BlueCSRCtx_t#(16, 32)] server_test_map(ServerTest_ifc);
     endmethod
 endmodule
 
-module [Module] mkServerTest#(Bool buffer_in)(ReadOnly#(Bool));
-    BlueCSRAccess_ifc#(16, 32, 0, ServerTest_ifc) i_csr   <- create_blue_csr(server_test_map, buffer_in);
+module [Module] mkServerTest#(Bool buffer_in, Bool buffer_decode, Bool buffer_out)(ReadOnly#(Bool));
+    BlueCSRCfg_t cfg = BlueCSRCfg_t {
+        buffer_in:        buffer_in,
+        buffer_decode:    buffer_decode,
+        buffer_out:       buffer_out,
+        default_response: CSR_DECERR
+    };
+
+    BlueCSRAccess_ifc#(16, 32, 0, ServerTest_ifc) i_csr   <- create_blue_csr_cfg(server_test_map, cfg);
     Reg#(Bool)                                    rg_done <- mkReg(False);
     Reg#(UInt#(8))                                rg_i    <- mkReg(0);
 
@@ -70,7 +77,7 @@ module [Module] mkServerTest#(Bool buffer_in)(ReadOnly#(Bool));
         action
             let rsp <- i_csr.external.response.get;
             if(rsp.rdata != data || rsp.resp != resp) begin
-                $display("FAIL: buffer=%0d expected=%h/%h got=%h/%h", buffer_in, data, pack(resp), rsp.rdata, pack(rsp.resp));
+                $display("FAIL: in=%0d dec=%0d out=%0d expected=%h/%h got=%h/%h", buffer_in, buffer_decode, buffer_out, data, pack(resp), rsp.rdata, pack(rsp.resp));
                 $finish(1);
             end
         endaction
@@ -130,8 +137,11 @@ endmodule
 
 (* synthesize *)
 module [Module] mkTestBlueCSRServer(Empty);
-    ReadOnly#(Bool) i_unbuffered <- mkServerTest(False);
-    ReadOnly#(Bool) i_buffered   <- mkServerTest(True);
+    ReadOnly#(Bool) i_unbuffered <- mkServerTest(False, False, False);
+    ReadOnly#(Bool) i_buffered   <- mkServerTest(True,  False, False);
+    ReadOnly#(Bool) i_decode     <- mkServerTest(False, True,  False);
+    ReadOnly#(Bool) i_decode_in  <- mkServerTest(True,  True,  False);
+    ReadOnly#(Bool) i_all        <- mkServerTest(True,  True,  True);
     Reg#(UInt#(16)) rg_cycles    <- mkReg(0);
 
     let {_, entries} <- getCollection(server_test_map);
@@ -145,7 +155,7 @@ module [Module] mkTestBlueCSRServer(Empty);
             $finish(1);
         end
     endrule
-    rule r_finish (i_unbuffered && i_buffered);
+    rule r_finish (i_unbuffered && i_buffered && i_decode && i_decode_in && i_all);
         $display("PASS: server and BRAM regions: latency, ordering, strobes, readiness, alignment and permissions");
         $finish(0);
     endrule

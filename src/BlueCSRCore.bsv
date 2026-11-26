@@ -1159,17 +1159,78 @@ endinterface
 typedef BusAccess_ifc#(BlueCSR_Fab_ifc#(aw, dw), int_ifc)   BlueCSRAccess_Fab_ifc#(numeric type aw, numeric type dw, type int_ifc);
 typedef BusAccess_ifc#(BlueCSR_ifc#(aw, dw, ni), int_ifc)   BlueCSRAccess_ifc#(numeric type aw, numeric type dw, numeric type ni, type int_ifc);
 
-//buffer_in: requests are registered before decode; buffer_out: responses are registered, so no
-//combinational path runs from the request through decode to the consumer; both add one cycle
+//buffer_in registers requests before decode
+//buffer_decode registers the address decode, so the access rules and the response mux work from a decoded request
+//buffer_out registers responses, so no combinational path runs from the request through decode to the consumer
+//each adds one cycle
 typedef struct {
     Bool              buffer_in;
+    Bool              buffer_decode;
     Bool              buffer_out;
     BlueCSRResponse_t default_response;
 } BlueCSRCfg_t deriving(Bits, Eq, FShow);
 
 instance DefaultValue#(BlueCSRCfg_t);
-    defaultValue = BlueCSRCfg_t { buffer_in: False, buffer_out: False, default_response: CSR_DECERR };
+    defaultValue = BlueCSRCfg_t {
+        buffer_in:        False,
+        buffer_decode:    False,
+        buffer_out:       False,
+        default_response: CSR_DECERR
+    };
 endinstance
+
+/*
+ * One-entry stage between the decode and the access rules. notFull and notEmpty come from the same register, so
+ * the decode rule and the access rules have disjoint guards and no ready path runs back from the access rules into
+ * the decode. A new request enters at most every second cycle.
+ */
+module mkCSRDecodeSlot(FIFOF#(t))
+    provisos(
+        Bits#(t, t_w)
+    );
+    Reg#(Bool) rg_valid <- mkReg(False);
+    Reg#(t)    rg_data  <- mkRegU;
+
+    method Action enq(t x) if(!rg_valid);
+        rg_data  <= x;
+        rg_valid <= True;
+    endmethod
+    method Action deq if(rg_valid);
+        rg_valid <= False;
+    endmethod
+    method t first if(rg_valid) = rg_data;
+    method Bool notFull  = !rg_valid;
+    method Bool notEmpty = rg_valid;
+    method Action clear;
+        rg_valid <= False;
+    endmethod
+endmodule
+
+//select of one access rule, combinational from the request or captured with it by the decode stage
+interface CSRDecodeSel_ifc;
+    method Bool   sel;
+    method Action capture;
+endinterface
+
+module mkCSRDecodeSel#(Bool registered, Bool hit)(CSRDecodeSel_ifc);
+    CSRDecodeSel_ifc ifc = interface CSRDecodeSel_ifc;
+        method Bool   sel     = hit;
+        method Action capture = noAction;
+    endinterface;
+
+    if(registered) begin
+        Reg#(Bool) rg_sel <- mkReg(False);
+
+        ifc = interface CSRDecodeSel_ifc;
+            method Bool   sel = rg_sel;
+            method Action capture;
+                rg_sel <= hit;
+            endmethod
+        endinterface;
+    end
+
+    return ifc;
+endmodule
 
 module [Module] create_blue_csr_cfg#(BlueCSRCtx_t#(aw, dw, i) ctx, BlueCSRCfg_t cfg)(BlueCSRAccess_ifc#(aw, dw, ni, i));
     let {device, entries} <- getCollection(ctx);
@@ -1183,6 +1244,7 @@ module [Module] create_blue_csr_from_entries#(
     BlueCSRCfg_t                  cfg
 )(BlueCSRAccess_ifc#(aw, dw, ni, i));
     Bool              buffer_in        = cfg.buffer_in;
+    Bool              buffer_decode    = cfg.buffer_decode;
     BlueCSRResponse_t default_response = cfg.default_response;
 
     let validation = validate_blue_csr_entries(c);
@@ -1227,6 +1289,17 @@ module [Module] create_blue_csr_from_entries#(
         f_req <- mkBypassFIFOF;
     else
         f_req <- mkSizedFIFOF(1);
+
+    //the access rules serve f_exec, which is f_req itself or, with buffer_decode, the decode stage behind it
+    //each access rule is selected by a decode of f_req.first that the decode stage registers with the request
+    FIFOF#(BlueCSR_Req_t#(aw, dw)) f_exec = f_req;
+    if(buffer_decode) begin
+        FIFOF#(BlueCSR_Req_t#(aw, dw)) f_dec <- mkCSRDecodeSlot;
+        f_exec = f_dec;
+    end
+    //decodes of all access rules, the default response serves requests that select none
+    Bool          dec_hit      = False;
+    List#(Action) dec_captures = Nil;
 
     function Bit#(dw) combine_reads(List#(ReadOpPure_t#(dw)) l);
         function Bit#(dw) fold_read(Bit#(dw) acc, ReadOpPure_t#(dw) rop);
@@ -1304,17 +1377,26 @@ module [Module] create_blue_csr_from_entries#(
         let read_policy     = List::length(reg_policies) > 0 ? reg_policies[0].read_policy : CSR_ALLOW_ALL;
         let write_policy    = List::length(reg_policies) > 0 ? reg_policies[0].write_policy : CSR_ALLOW_ALL;
 
-        let req             = f_req.first;
-        let req_hit         = (req.addr == fromInteger(regdefs[i].offset));
-        let req_rd_allowed  = access_policy_allows(read_policy,  req.prot);
-        let req_wr_allowed  = access_policy_allows(write_policy, req.prot);
+        let dec_req         = f_req.first;
+        let req             = f_exec.first;
+        let req_hit         = (dec_req.addr == fromInteger(regdefs[i].offset));
+        let req_rd_allowed  = access_policy_allows(read_policy,  dec_req.prot);
+        let req_wr_allowed  = access_policy_allows(write_policy, dec_req.prot);
+        Bool rd_hit         = !dec_req.wr && req_hit && req_rd_allowed;
+        Bool wr_hit         = dec_req.wr && req_hit && req_wr_allowed;
+        Bool has_read       = (List::length(field_actions) > 0) || (List::length(field_values) > 0) || (List::length(rtrigs) > 0);
+        Bool has_write      = (List::length(write_actions) > 0) || (List::length(reg_writes) > 0) || (List::length(wtrigs) > 0);
 
         //TODO: should triggers align with data output? (difficult as it moves through arbitrarily delayed FIFOs)
 
-        if(List::length(field_actions) == 0) begin
-            if((List::length(field_values) > 0) || (List::length(rtrigs) > 0)) begin
+        if(has_read) begin
+            CSRDecodeSel_ifc rd_sel <- mkCSRDecodeSel(buffer_decode, rd_hit);
+            dec_captures = List::cons(rd_sel.capture, dec_captures);
+            dec_hit      = dec_hit || rd_hit;
+
+            if(List::length(field_actions) == 0) begin
                 read_rules = rJoinMutuallyExclusive(rules
-                    rule rread_reg_allow(!req.wr && req_hit && req_rd_allowed);
+                    rule rread_reg_allow(rd_sel.sel);
                         f_rsp.enq(
                             BlueCSR_Rsp_t {
                                 rdata:  combine_reads(field_values),
@@ -1322,43 +1404,47 @@ module [Module] create_blue_csr_from_entries#(
                             }
                         );
                         dispatch_read_triggers(rtrigs);
-                        f_req.deq;
+                        f_exec.deq;
+                    endrule
+                endrules, read_rules);
+            end
+            else begin
+                read_rules = rJoinMutuallyExclusive(rules
+                    //only the selected callback branch needs its method guards
+                    (* aggressive_implicit_conditions *)
+                    rule rread_reg_action_available(rd_sel.sel && field_actions[0].can_read);
+                        let action_rsp <- field_actions[0].f_read;
+                        f_rsp.enq(
+                            BlueCSR_Rsp_t {
+                                rdata:  combine_reads(field_values) | action_rsp.rdata,
+                                resp:   action_rsp.resp
+                            }
+                        );
+                        dispatch_read_triggers(rtrigs);
+                        f_exec.deq;
+                    endrule
+                    rule rread_reg_action_unavailable(rd_sel.sel && !field_actions[0].can_read);
+                        f_rsp.enq(
+                            BlueCSR_Rsp_t {
+                                rdata: combine_reads(field_values) | field_actions[0].unavailable_rsp.rdata,
+                                resp: field_actions[0].unavailable_rsp.resp
+                            }
+                        );
+                        dispatch_read_triggers(rtrigs);
+                        f_exec.deq;
                     endrule
                 endrules, read_rules);
             end
         end
-        else begin
-            read_rules = rJoinMutuallyExclusive(rules
-                //only the selected callback branch needs its method guards
-                (* aggressive_implicit_conditions *)
-                rule rread_reg_action_available(!req.wr && req_hit && req_rd_allowed && field_actions[0].can_read);
-                    let action_rsp <- field_actions[0].f_read;
-                    f_rsp.enq(
-                        BlueCSR_Rsp_t {
-                            rdata:  combine_reads(field_values) | action_rsp.rdata,
-                            resp:   action_rsp.resp
-                        }
-                    );
-                    dispatch_read_triggers(rtrigs);
-                    f_req.deq;
-                endrule
-                rule rread_reg_action_unavailable(!req.wr && req_hit && req_rd_allowed && !field_actions[0].can_read);
-                    f_rsp.enq(
-                        BlueCSR_Rsp_t {
-                            rdata: combine_reads(field_values) | field_actions[0].unavailable_rsp.rdata,
-                            resp: field_actions[0].unavailable_rsp.resp
-                        }
-                    );
-                    dispatch_read_triggers(rtrigs);
-                    f_req.deq;
-                endrule
-            endrules, read_rules);
-        end
 
-        if(List::length(write_actions) == 0) begin
-            if((List::length(reg_writes) > 0) || (List::length(wtrigs) > 0)) begin
+        if(has_write) begin
+            CSRDecodeSel_ifc wr_sel <- mkCSRDecodeSel(buffer_decode, wr_hit);
+            dec_captures = List::cons(wr_sel.capture, dec_captures);
+            dec_hit      = dec_hit || wr_hit;
+
+            if(List::length(write_actions) == 0) begin
                 write_rules = rJoinMutuallyExclusive(rules
-                    rule rwrite_reg_allow(req.wr && req_hit && req_wr_allowed);
+                    rule rwrite_reg_allow(wr_sel.sel);
                         dispatch_reg_writes(reg_writes, req.wdata, req.wstrb);
                         f_rsp.enq(
                             BlueCSR_Rsp_t {
@@ -1367,40 +1453,40 @@ module [Module] create_blue_csr_from_entries#(
                             }
                         );
                         dispatch_write_triggers(wtrigs);
-                        f_req.deq;
+                        f_exec.deq;
                     endrule
                 endrules, write_rules);
             end
-        end
-        else begin
-            write_rules = rJoinMutuallyExclusive(rules
-                //preserve conditional method guards in write callbacks
-                (* aggressive_implicit_conditions *)
-                rule rwrite_reg_action_available(req.wr && req_hit && req_wr_allowed && write_actions[0].can_write(req.wdata, req.wstrb));
-                    let action_resp <- write_actions[0].f_write(req.wdata, req.wstrb);
-                    if(action_resp == CSR_OKAY || action_resp == CSR_EXOKAY) begin
-                        dispatch_reg_writes(reg_writes, req.wdata, req.wstrb);
-                    end
-                    f_rsp.enq(
-                        BlueCSR_Rsp_t {
-                            rdata: 0,
-                            resp: action_resp
-                        }
-                    );
-                    dispatch_write_triggers(wtrigs);
-                    f_req.deq;
-                endrule
-                rule rwrite_reg_action_unavailable(req.wr && req_hit && req_wr_allowed && !write_actions[0].can_write(req.wdata, req.wstrb));
-                    f_rsp.enq(
-                        BlueCSR_Rsp_t {
-                            rdata: 0,
-                            resp: write_actions[0].unavailable_resp
-                        }
-                    );
-                    dispatch_write_triggers(wtrigs);
-                    f_req.deq;
-                endrule
-            endrules, write_rules);
+            else begin
+                write_rules = rJoinMutuallyExclusive(rules
+                    //preserve conditional method guards in write callbacks
+                    (* aggressive_implicit_conditions *)
+                    rule rwrite_reg_action_available(wr_sel.sel && write_actions[0].can_write(req.wdata, req.wstrb));
+                        let action_resp <- write_actions[0].f_write(req.wdata, req.wstrb);
+                        if(action_resp == CSR_OKAY || action_resp == CSR_EXOKAY) begin
+                            dispatch_reg_writes(reg_writes, req.wdata, req.wstrb);
+                        end
+                        f_rsp.enq(
+                            BlueCSR_Rsp_t {
+                                rdata: 0,
+                                resp: action_resp
+                            }
+                        );
+                        dispatch_write_triggers(wtrigs);
+                        f_exec.deq;
+                    endrule
+                    rule rwrite_reg_action_unavailable(wr_sel.sel && !write_actions[0].can_write(req.wdata, req.wstrb));
+                        f_rsp.enq(
+                            BlueCSR_Rsp_t {
+                                rdata: 0,
+                                resp: write_actions[0].unavailable_resp
+                            }
+                        );
+                        dispatch_write_triggers(wtrigs);
+                        f_exec.deq;
+                    endrule
+                endrules, write_rules);
+            end
         end
     end
 
@@ -1412,18 +1498,25 @@ module [Module] create_blue_csr_from_entries#(
         let read_policy     = List::length(region_policies) > 0 ? region_policies[0].read_policy : CSR_ALLOW_ALL;
         let write_policy    = List::length(region_policies) > 0 ? region_policies[0].write_policy : CSR_ALLOW_ALL;
 
-        let req             = f_req.first;
+        let dec_req         = f_req.first;
+        let req             = f_exec.first;
         Bit#(aw) local_addr = req.addr - fromInteger(regiondefs[i].offset);
-        let req_hit         = is_region_addr(req.addr, regiondefs[i].offset, regiondefs[i].length);
-        let req_aligned     = is_word_aligned(req.addr);
-        let req_rd_allowed  = access_policy_allows(read_policy,  req.prot);
-        let req_wr_allowed  = access_policy_allows(write_policy, req.prot);
+        let req_hit         = is_region_addr(dec_req.addr, regiondefs[i].offset, regiondefs[i].length);
+        let req_aligned     = is_word_aligned(dec_req.addr);
+        let req_rd_allowed  = access_policy_allows(read_policy,  dec_req.prot);
+        let req_wr_allowed  = access_policy_allows(write_policy, dec_req.prot);
         //region writes are only valid for entire words
-        let req_wr_valid    = req.wstrb == unpack(-1);
+        let req_wr_valid    = dec_req.wstrb == unpack(-1);
+        Bool rd_hit         = !dec_req.wr && req_hit && req_aligned && req_rd_allowed;
+        Bool wr_hit         = dec_req.wr && req_hit && req_aligned && req_wr_valid && req_wr_allowed;
 
         if(List::length(region_reads) > 0) begin
+            CSRDecodeSel_ifc rd_sel <- mkCSRDecodeSel(buffer_decode, rd_hit);
+            dec_captures = List::cons(rd_sel.capture, dec_captures);
+            dec_hit      = dec_hit || rd_hit;
+
             read_rules = rJoinMutuallyExclusive(rules
-            rule rread_region_allow(!req.wr && req_hit && req_aligned && req_rd_allowed);
+            rule rread_region_allow(rd_sel.sel);
                 Bit#(dw) read_data = region_reads[0].f_read(local_addr);
                 f_rsp.enq(
                     BlueCSR_Rsp_t {
@@ -1431,14 +1524,18 @@ module [Module] create_blue_csr_from_entries#(
                         resp:   CSR_OKAY
                     }
                 );
-                f_req.deq;
+                f_exec.deq;
             endrule
             endrules, read_rules);
         end
 
         if(List::length(region_writes) > 0) begin
+            CSRDecodeSel_ifc wr_sel <- mkCSRDecodeSel(buffer_decode, wr_hit);
+            dec_captures = List::cons(wr_sel.capture, dec_captures);
+            dec_hit      = dec_hit || wr_hit;
+
             write_rules = rJoinMutuallyExclusive(rules
-            rule rwrite_region_allow(req.wr && req_hit && req_aligned && req_wr_valid && req_wr_allowed);
+            rule rwrite_region_allow(wr_sel.sel);
                 region_writes[0].f_write(local_addr, req.wdata);
                 f_rsp.enq(
                     BlueCSR_Rsp_t {
@@ -1446,14 +1543,14 @@ module [Module] create_blue_csr_from_entries#(
                         resp:   CSR_OKAY
                     }
                 );
-                f_req.deq;
+                f_exec.deq;
                 //region writes are only allowed for fully enabled strobes
             endrule
             endrules, write_rules);
         end
     end
 
-    //a server access holds its request in f_req until the response returns, so no other rule can match it
+    //a server access holds its request in f_exec until the response returns, so no other rule can match it
     Bool server_busy = False;
     for (Integer i = 0; i < List::length(server_regions); i = i + 1) begin
         let region          = server_regions[i];
@@ -1464,12 +1561,20 @@ module [Module] create_blue_csr_from_entries#(
         Reg#(Bool) rg_waiting <- mkReg(False);
         server_busy = server_busy || rg_waiting;
 
-        let req             = f_req.first;
+        let dec_req         = f_req.first;
+        let req             = f_exec.first;
         let local_req       = req;
         local_req.addr      = req.addr - fromInteger(region.offset);
-        let req_hit         = is_region_addr(req.addr, region.offset, region.length) && is_word_aligned(req.addr);
-        let req_rd_allowed  = access_policy_allows(read_policy,  req.prot);
-        let req_wr_allowed  = access_policy_allows(write_policy, req.prot);
+        let req_hit         = is_region_addr(dec_req.addr, region.offset, region.length) && is_word_aligned(dec_req.addr);
+        let req_rd_allowed  = access_policy_allows(read_policy,  dec_req.prot);
+        let req_wr_allowed  = access_policy_allows(write_policy, dec_req.prot);
+        Bool rd_hit         = !dec_req.wr && req_hit && req_rd_allowed;
+        Bool wr_hit         = dec_req.wr && req_hit && req_wr_allowed;
+
+        CSRDecodeSel_ifc rd_sel <- mkCSRDecodeSel(buffer_decode, rd_hit);
+        CSRDecodeSel_ifc wr_sel <- mkCSRDecodeSel(buffer_decode, wr_hit);
+        dec_captures = List::cons(rd_sel.capture, List::cons(wr_sel.capture, dec_captures));
+        dec_hit      = dec_hit || rd_hit || wr_hit;
 
         //reads and writes join the rule group of their direction, like registers and regions above
         function Rules server_rules(Bool dir_hit) = rules
@@ -1481,52 +1586,80 @@ module [Module] create_blue_csr_from_entries#(
             endrule
             rule rserver_region_unavailable(!rg_waiting && dir_hit && !region.can_access);
                 f_rsp.enq(BlueCSR_Rsp_t { rdata: 0, resp: region.unavailable_resp });
-                f_req.deq;
+                f_exec.deq;
             endrule
-            //the request stays at the head of f_req until its response returns
+            //the request stays at the head of f_exec until its response returns
             (* aggressive_implicit_conditions *)
             rule rserver_region_response(rg_waiting && dir_hit);
                 let rsp <- region.server.response.get;
                 f_rsp.enq(rsp);
-                f_req.deq;
+                f_exec.deq;
                 rg_waiting <= False;
             endrule
         endrules;
 
-        read_rules  = rJoinMutuallyExclusive(server_rules(!req.wr && req_hit && req_rd_allowed), read_rules);
-        write_rules = rJoinMutuallyExclusive(server_rules(req.wr && req_hit && req_wr_allowed), write_rules);
+        read_rules  = rJoinMutuallyExclusive(server_rules(rd_sel.sel), read_rules);
+        write_rules = rJoinMutuallyExclusive(server_rules(wr_sel.sel), write_rules);
     end
 
-    read_rules = rJoinDescendingUrgency(read_rules,
-        rules
-            rule rread_default(!f_req.first.wr && !server_busy); //only fires if a request is available
+    if(buffer_decode) begin
+        //the decode stage selects the default response like any other access, so no rule waits on another's guard
+        CSRDecodeSel_ifc default_sel <- mkCSRDecodeSel(True, !dec_hit);
+
+        rule r_decode;
+            f_exec.enq(f_req.first);
+            f_req.deq;
+            default_sel.capture;
+            List::joinActions(dec_captures);
+        endrule
+
+        Rules default_rules = rules
+            rule r_default_decoded (default_sel.sel);
                 f_rsp.enq(
                     BlueCSR_Rsp_t {
                         rdata:  0,
                         resp:   default_response
                     }
                 );
-                f_req.deq;
+                f_exec.deq;
             endrule
-        endrules
-    );
+        endrules;
 
-    write_rules = rJoinDescendingUrgency(write_rules,
-        rules
-            rule rwrite_default(f_req.first.wr && !server_busy);
-                f_rsp.enq(
-                    BlueCSR_Rsp_t {
-                        rdata:  0,
-                        resp:   default_response
-                    }
-                );
-                f_req.deq;
-            endrule
-        endrules
-    );
+        //the registered selects are one-hot, which the compiler cannot prove across registers
+        addRules(rJoinMutuallyExclusive(rJoinMutuallyExclusive(read_rules, write_rules), default_rules));
+    end
+    else begin
+        read_rules = rJoinDescendingUrgency(read_rules,
+            rules
+                rule rread_default(!f_req.first.wr && !server_busy); //only fires if a request is available
+                    f_rsp.enq(
+                        BlueCSR_Rsp_t {
+                            rdata:  0,
+                            resp:   default_response
+                        }
+                    );
+                    f_req.deq;
+                endrule
+            endrules
+        );
 
-    addRules(read_rules);
-    addRules(write_rules);
+        write_rules = rJoinDescendingUrgency(write_rules,
+            rules
+                rule rwrite_default(f_req.first.wr && !server_busy);
+                    f_rsp.enq(
+                        BlueCSR_Rsp_t {
+                            rdata:  0,
+                            resp:   default_response
+                        }
+                    );
+                    f_req.deq;
+                endrule
+            endrules
+        );
+
+        addRules(read_rules);
+        addRules(write_rules);
+    end
 
     interface BlueCSR_ifc external;
         interface request  = toPut(f_req);
@@ -1552,12 +1685,24 @@ module [Module] create_blue_csr_with_default_response#(
     Bool buffer_in,
     BlueCSRResponse_t default_response
 )(BlueCSRAccess_ifc#(aw, dw, ni, i));
-    let csr <- create_blue_csr_cfg(ctx, BlueCSRCfg_t { buffer_in: buffer_in, buffer_out: False, default_response: default_response });
+    BlueCSRCfg_t cfg = BlueCSRCfg_t {
+        buffer_in:        buffer_in,
+        buffer_decode:    False,
+        buffer_out:       False,
+        default_response: default_response
+    };
+    let csr <- create_blue_csr_cfg(ctx, cfg);
     return csr;
 endmodule
 
 module [Module] create_blue_csr#(BlueCSRCtx_t#(aw, dw, i) ctx, Bool buffer_in)(BlueCSRAccess_ifc#(aw, dw, ni, i));
-    let csr <- create_blue_csr_cfg(ctx, BlueCSRCfg_t { buffer_in: buffer_in, buffer_out: False, default_response: CSR_DECERR });
+    BlueCSRCfg_t cfg = BlueCSRCfg_t {
+        buffer_in:        buffer_in,
+        buffer_decode:    False,
+        buffer_out:       False,
+        default_response: CSR_DECERR
+    };
+    let csr <- create_blue_csr_cfg(ctx, cfg);
     return csr;
 endmodule
 
